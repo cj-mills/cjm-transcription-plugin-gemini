@@ -344,8 +344,8 @@ class GeminiPlugin(PluginInterface):
                 downsample_audio(
                     audio_path,
                     downsampled,
-                    # sample_rate=self.config.get("downsample_rate", 16000),
-                    # channels=self.config.get("downsample_channels", 1)
+                    sample_rate=self.config.get("downsample_rate", 16000),
+                    channels=self.config.get("downsample_channels", 1)
                 )
                 
                 # Clean up original temp file if created
