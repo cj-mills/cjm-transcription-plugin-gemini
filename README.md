@@ -109,16 +109,9 @@ class GeminiPlugin:
     def execute(
             self,
             audio: Union[AudioData, str, Path],  # Audio data object or path to audio file
-            **kwargs
+            **kwargs # Additional arguments to override config
         ) -> TranscriptionResult:  # Returns transcription result object
-        "Transcribe audio using Gemini.
-
-Args:
-    audio: Audio data or path to audio file
-    **kwargs: Additional arguments to override config
-    
-Returns:
-    TranscriptionResult with transcribed text"
+        "Transcribe audio using Gemini."
     
     def is_available(
             self
