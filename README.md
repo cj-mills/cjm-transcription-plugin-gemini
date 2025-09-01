@@ -50,71 +50,67 @@ from cjm_transcription_plugin_gemini.plugin import (
 ``` python
 class GeminiPlugin:
     def __init__(self):
+        """Initialize the Gemini plugin with default configuration."""
         self.logger = logging.getLogger(f"{__name__}.{type(self).__name__}")
         self.config = {}
         self.client = None
         self.available_models = []
     
     @property
-    def name(self) -> str
+    def name(
+        self
+    ) -> str:  # Returns the plugin name identifier
     "Google Gemini API transcription plugin."
     
     def __init__(self):
+            """Initialize the Gemini plugin with default configuration."""
             self.logger = logging.getLogger(f"{__name__}.{type(self).__name__}")
             self.config = {}
             self.client = None
             self.available_models = []
         
         @property
-        def name(self) -> str
+        def name(
+            self
+        ) -> str:  # Returns the plugin name identifier
+        "Initialize the Gemini plugin with default configuration."
     
-    def name(self) -> str:
-            return "gemini"
-        
-        @property
-        def version(self) -> str
+    def name(
+            self
+        ) -> str:  # Returns the plugin name identifier
+        "Return the plugin name identifier."
     
-    def version(self) -> str:
-            return "1.0.0"
-        
-        @property
-        def supported_formats(self) -> List[str]
+    def version(
+            self
+        ) -> str:  # Returns the plugin version string
+        "Return the plugin version string."
     
-    def supported_formats(self) -> List[str]:
-            return ["wav", "mp3", "aiff", "aac", "ogg", "flac"]
-        
-        def get_config_schema(self) -> Dict[str, Any]
+    def supported_formats(
+            self
+        ) -> List[str]:  # Returns list of supported audio formats
+        "Return list of supported audio file formats."
     
-    def get_config_schema(self) -> Dict[str, Any]:
-            """Return configuration schema for Gemini."""
-            return {
-                "$schema": "http://json-schema.org/draft-07/schema#",
+    def get_config_schema(
+            self
+        ) -> Dict[str, Any]:  # Returns JSON schema for configuration validation
         "Return configuration schema for Gemini."
     
-    def get_current_config(self) -> Dict[str, Any]:
-            """Return current configuration."""
-            defaults = self.get_config_defaults()
-            return {**defaults, **self.config}
-        
-        def _get_api_key(self) -> str
+    def get_current_config(
+            self
+        ) -> Dict[str, Any]:  # Returns the merged configuration dictionary
         "Return current configuration."
     
-    def initialize(self, config: Optional[Dict[str, Any]] = None) -> None:
-            """Initialize the plugin with configuration."""
-            if config
+    def initialize(
+            self,
+            config: Optional[Dict[str, Any]] = None  # Configuration dictionary to override defaults
+        ) -> None
         "Initialize the plugin with configuration."
     
-    def execute(self, audio: Union[AudioData, str, Path], **kwargs) -> TranscriptionResult:
-            """Transcribe audio using Gemini.
-            
-            Args:
-                audio: Audio data or path to audio file
-                **kwargs: Additional arguments to override config
-                
-            Returns:
-                TranscriptionResult with transcribed text
-            """
-            if not self.client
+    def execute(
+            self,
+            audio: Union[AudioData, str, Path],  # Audio data object or path to audio file
+            **kwargs
+        ) -> TranscriptionResult:  # Returns transcription result object
         "Transcribe audio using Gemini.
 
 Args:
@@ -124,23 +120,18 @@ Args:
 Returns:
     TranscriptionResult with transcribed text"
     
-    def is_available(self) -> bool:
-            """Check if Gemini API is available."""
-            return GEMINI_AVAILABLE
-        
-        def cleanup(self) -> None
+    def is_available(
+            self
+        ) -> bool:  # Returns True if the Gemini API is available
         "Check if Gemini API is available."
     
-    def cleanup(self) -> None:
-            """Clean up resources."""
-            self.client = None
-            self.logger.info("Cleanup completed")
-        
-        def get_available_models(self) -> List[str]
+    def cleanup(
+            self
+        ) -> None
         "Clean up resources."
     
-    def get_available_models(self) -> List[str]:
-            """Get list of available audio-capable models."""
-            if self.config.get("auto_refresh_models", True) and self.client
+    def get_available_models(
+            self
+        ) -> List[str]:  # Returns list of available model names
         "Get list of available audio-capable models."
 ```

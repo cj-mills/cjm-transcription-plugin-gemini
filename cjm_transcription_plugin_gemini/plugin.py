@@ -50,24 +50,36 @@ class GeminiPlugin(PluginInterface):
     ]
     
     def __init__(self):
+        """Initialize the Gemini plugin with default configuration."""
         self.logger = logging.getLogger(f"{__name__}.{type(self).__name__}")
         self.config = {}
         self.client = None
         self.available_models = []
     
     @property
-    def name(self) -> str:
+    def name(
+        self
+    ) -> str:  # Returns the plugin name identifier
+        """Return the plugin name identifier."""
         return "gemini"
     
     @property
-    def version(self) -> str:
+    def version(
+        self
+    ) -> str:  # Returns the plugin version string
+        """Return the plugin version string."""
         return "1.0.0"
     
     @property
-    def supported_formats(self) -> List[str]:
+    def supported_formats(
+        self
+    ) -> List[str]:  # Returns list of supported audio formats
+        """Return list of supported audio file formats."""
         return ["wav", "mp3", "aiff", "aac", "ogg", "flac"]
     
-    def get_config_schema(self) -> Dict[str, Any]:
+    def get_config_schema(
+        self
+    ) -> Dict[str, Any]:  # Returns JSON schema for configuration validation
         """Return configuration schema for Gemini."""
         return {
             "$schema": "http://json-schema.org/draft-07/schema#",
@@ -161,12 +173,16 @@ class GeminiPlugin(PluginInterface):
             "additionalProperties": False
         }
     
-    def get_current_config(self) -> Dict[str, Any]:
+    def get_current_config(
+        self
+    ) -> Dict[str, Any]:  # Returns the merged configuration dictionary
         """Return current configuration."""
         defaults = self.get_config_defaults()
         return {**defaults, **self.config}
     
-    def _get_api_key(self) -> str:
+    def _get_api_key(
+        self
+    ) -> str:  # Returns the API key string
         """Get API key from config or environment."""
         api_key = self.config.get("api_key")
         if not api_key:
@@ -175,7 +191,9 @@ class GeminiPlugin(PluginInterface):
             raise ValueError("No API key provided. Set GEMINI_API_KEY environment variable or provide api_key in config")
         return api_key
     
-    def _refresh_available_models(self) -> List[str]:
+    def _refresh_available_models(
+        self
+    ) -> List[str]:  # Returns list of available model names
         """Fetch and filter available models from Gemini API."""
         try:
             if not self.client:
@@ -207,7 +225,10 @@ class GeminiPlugin(PluginInterface):
             self.logger.warning(f"Could not fetch models from API: {e}. Using defaults.")
             return self.DEFAULT_AUDIO_MODELS
     
-    def initialize(self, config: Optional[Dict[str, Any]] = None) -> None:
+    def initialize(
+        self,
+        config: Optional[Dict[str, Any]] = None  # Configuration dictionary to override defaults
+    ) -> None:
         """Initialize the plugin with configuration."""
         if config:
             is_valid, error = self.validate_config(config)
@@ -238,7 +259,10 @@ class GeminiPlugin(PluginInterface):
             self.logger.error(f"Failed to initialize Gemini client: {e}")
             raise
     
-    def _prepare_audio(self, audio: Union[AudioData, str, Path]) -> Tuple[Path, bool]:
+    def _prepare_audio(
+        self,
+        audio: Union[AudioData, str, Path]  # Audio data object or path to audio file
+    ) -> Tuple[Path, bool]:  # Returns tuple of (processed audio path, whether temp file was created)
         """Prepare audio file for upload.
         
         Returns:
@@ -294,7 +318,11 @@ class GeminiPlugin(PluginInterface):
         
         return audio_path, temp_created
     
-    def execute(self, audio: Union[AudioData, str, Path], **kwargs) -> TranscriptionResult:
+    def execute(
+        self,
+        audio: Union[AudioData, str, Path],  # Audio data object or path to audio file
+        **kwargs
+    ) -> TranscriptionResult:  # Returns transcription result object
         """Transcribe audio using Gemini.
         
         Args:
@@ -403,16 +431,22 @@ class GeminiPlugin(PluginInterface):
                 except Exception:
                     pass
     
-    def is_available(self) -> bool:
+    def is_available(
+        self
+    ) -> bool:  # Returns True if the Gemini API is available
         """Check if Gemini API is available."""
         return GEMINI_AVAILABLE
     
-    def cleanup(self) -> None:
+    def cleanup(
+        self
+    ) -> None:
         """Clean up resources."""
         self.client = None
         self.logger.info("Cleanup completed")
     
-    def get_available_models(self) -> List[str]:
+    def get_available_models(
+        self
+    ) -> List[str]:  # Returns list of available model names
         """Get list of available audio-capable models."""
         if self.config.get("auto_refresh_models", True) and self.client:
             self.available_models = self._refresh_available_models()
