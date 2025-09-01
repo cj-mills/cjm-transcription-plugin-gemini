@@ -152,4 +152,4 @@ checklink/cookies.txt
 .quarto
 
 # Custom
-/_test_files/*
+/test_files/*
