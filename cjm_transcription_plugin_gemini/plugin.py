@@ -15,6 +15,8 @@ import re
 
 import numpy as np
 
+from fastcore.basics import patch
+
 try:
     from google import genai
     from google.genai import types
@@ -56,6 +58,7 @@ class GeminiPlugin(PluginInterface):
         self.client = None
         self.available_models = []
         self.model_token_limits = {}  # Store model name -> output_token_limit mapping
+        self.uploaded_files = []  # Track uploaded files for cleanup
     
     @property
     def name(
@@ -77,7 +80,7 @@ class GeminiPlugin(PluginInterface):
     ) -> List[str]:  # Returns list of supported audio formats
         """Return list of supported audio file formats."""
         return ["wav", "mp3", "aiff", "aac", "ogg", "flac"]
-    
+
     def get_config_schema(
         self
     ) -> Dict[str, Any]:  # Returns JSON schema for configuration validation
@@ -172,84 +175,34 @@ class GeminiPlugin(PluginInterface):
                     "items": {"type": "string"},
                     "default": [],
                     "description": "Keywords to exclude from model names (e.g., ['tts', 'image'])"
+                },
+                "use_file_upload": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Upload audio files to Gemini API instead of embedding in request"
+                },
+                "use_streaming": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Use streaming response for transcription"
+                },
+                "delete_uploaded_files": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Delete uploaded files after transcription"
                 }
             },
             "required": ["model"],
             "additionalProperties": False
         }
-    
+
     def get_current_config(
         self
     ) -> Dict[str, Any]:  # Returns the merged configuration dictionary
         """Return current configuration."""
         defaults = self.get_config_defaults()
         return {**defaults, **self.config}
-    
-    def _get_api_key(
-        self
-    ) -> str:  # Returns the API key string
-        """Get API key from config or environment."""
-        api_key = self.config.get("api_key")
-        if not api_key:
-            api_key = os.environ.get("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("No API key provided. Set GEMINI_API_KEY environment variable or provide api_key in config")
-        return api_key
-    
-    def _refresh_available_models(
-        self
-    ) -> List[str]:  # Returns list of available model names
-        """Fetch and filter available models from Gemini API."""
-        try:
-            if not self.client:
-                return self.DEFAULT_AUDIO_MODELS
-            
-            # Get all models that support content generation
-            all_models = list(self.client.models.list())
-            gen_models = [model for model in all_models if 'generateContent' in model.supported_actions]
-            
-            # Extract model names and apply filters
-            model_filter = self.config.get("model_filter", [])
-            if not model_filter:
-                model_filter = ['tts', 'image', 'learn']  # Default exclusions
-            
-            filtered_names = []
-            self.model_token_limits = {}  # Reset token limits
-            
-            for model in gen_models:
-                model_name = model.name.removeprefix('models/')
-                # Skip if any filter keyword is in the model name
-                if not any(keyword in model_name.lower() for keyword in model_filter):
-                    filtered_names.append(model_name)
-                    # Store the output token limit for this model
-                    self.model_token_limits[model_name] = model.output_token_limit
-            
-            # Sort with newest/best models first
-            filtered_names.sort(reverse=True)
-            
-            self.logger.info(f"Found {len(filtered_names)} audio-capable models")
-            return filtered_names if filtered_names else self.DEFAULT_AUDIO_MODELS
-            
-        except Exception as e:
-            self.logger.warning(f"Could not fetch models from API: {e}. Using defaults.")
-            return self.DEFAULT_AUDIO_MODELS
-    
-    def _update_max_tokens_for_model(
-        self,
-        model_name: str  # Model name to update tokens for
-    ) -> None:
-        """Update max_output_tokens config based on the model's token limit."""
-        if model_name in self.model_token_limits:
-            token_limit = self.model_token_limits[model_name]
-            # Update the config with the model's actual limit
-            self.config["max_output_tokens"] = token_limit
-            self.logger.info(f"Updated max_output_tokens to {token_limit} for model '{model_name}'")
-        else:
-            # Use a sensible default if we don't have the limit
-            default_limit = 65536  # Common default for newer models
-            self.config["max_output_tokens"] = default_limit
-            self.logger.info(f"Using default max_output_tokens of {default_limit} for model '{model_name}'")
-    
+
     def initialize(
         self,
         config: Optional[Dict[str, Any]] = None  # Configuration dictionary to override defaults
@@ -286,81 +239,7 @@ class GeminiPlugin(PluginInterface):
         except Exception as e:
             self.logger.error(f"Failed to initialize Gemini client: {e}")
             raise
-    
-    def update_config(
-        self,
-        config: Dict[str, Any]  # New configuration values
-    ) -> None:
-        """Update plugin configuration, adjusting max_tokens if model changes."""
-        old_model = self.config.get("model")
-        
-        # Update config through parent class or directly
-        self.config.update(config)
-        
-        # If model changed, update max_output_tokens
-        new_model = self.config.get("model")
-        if new_model and new_model != old_model:
-            self._update_max_tokens_for_model(new_model)
-    
-    def _prepare_audio(
-        self,
-        audio: Union[AudioData, str, Path]  # Audio data object or path to audio file
-    ) -> Tuple[Path, bool]:  # Returns tuple of (processed audio path, whether temp file was created)
-        """Prepare audio file for upload.
-        
-        Returns:
-            Tuple of (audio_path, is_temp_file)
-        """
-        temp_created = False
-        
-        if isinstance(audio, (str, Path)):
-            audio_path = Path(audio)
-        elif isinstance(audio, AudioData):
-            # Save AudioData to temporary file
-            import soundfile as sf
-            temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-            
-            audio_array = audio.samples
-            # Convert to mono if stereo
-            if audio_array.ndim > 1:
-                audio_array = audio_array.mean(axis=1)
-            
-            # Ensure float32 and normalized
-            if audio_array.dtype != np.float32:
-                audio_array = audio_array.astype(np.float32)
-            if audio_array.max() > 1.0:
-                audio_array = audio_array / np.abs(audio_array).max()
-            
-            sf.write(temp_file.name, audio_array, audio.sample_rate)
-            audio_path = Path(temp_file.name)
-            temp_created = True
-        else:
-            raise ValueError(f"Unsupported audio input type: {type(audio)}")
-        
-        # Optionally downsample audio
-        if self.config.get("downsample_audio", False) and FFMPEG_AVAILABLE:
-            try:
-                downsampled = audio_path.with_stem(f"{audio_path.stem}_downsampled")
-                downsample_audio(
-                    audio_path,
-                    downsampled,
-                    sample_rate=self.config.get("downsample_rate", 16000),
-                    channels=self.config.get("downsample_channels", 1)
-                )
-                
-                # Clean up original temp file if created
-                if temp_created:
-                    audio_path.unlink()
-                
-                audio_path = downsampled
-                temp_created = True
-                self.logger.info(f"Downsampled audio to {self.config['downsample_rate']}Hz")
-                
-            except Exception as e:
-                self.logger.warning(f"Failed to downsample audio: {e}")
-        
-        return audio_path, temp_created
-    
+
     def execute(
         self,
         audio: Union[AudioData, str, Path],  # Audio data object or path to audio file
@@ -376,32 +255,39 @@ class GeminiPlugin(PluginInterface):
         
         # Prepare audio file
         audio_path, temp_created = self._prepare_audio(audio)
+        uploaded_file = None
         
         try:
             # Merge runtime kwargs with config
             exec_config = {**self.config, **kwargs}
             
-            # Read audio file
-            with open(audio_path, 'rb') as f:
-                audio_bytes = f.read()
-            
-            # Determine MIME type
-            suffix = audio_path.suffix.lower()
-            mime_map = {
-                '.wav': 'audio/wav',
-                '.mp3': 'audio/mp3',
-                '.aiff': 'audio/aiff',
-                '.aac': 'audio/aac',
-                '.ogg': 'audio/ogg',
-                '.flac': 'audio/flac'
-            }
-            mime_type = mime_map.get(suffix, 'audio/wav')
-            
-            # Create audio content part
-            audio_content = types.Part.from_bytes(
-                data=audio_bytes,
-                mime_type=mime_type
-            )
+            # Decide whether to upload file or embed in request
+            if exec_config.get("use_file_upload", False):
+                # Upload audio file to Gemini API
+                uploaded_file = self._upload_audio_file(audio_path)
+                audio_content = uploaded_file
+            else:
+                # Read audio file and embed in request (existing behavior)
+                with open(audio_path, 'rb') as f:
+                    audio_bytes = f.read()
+                
+                # Determine MIME type
+                suffix = audio_path.suffix.lower()
+                mime_map = {
+                    '.wav': 'audio/wav',
+                    '.mp3': 'audio/mp3',
+                    '.aiff': 'audio/aiff',
+                    '.aac': 'audio/aac',
+                    '.ogg': 'audio/ogg',
+                    '.flac': 'audio/flac'
+                }
+                mime_type = mime_map.get(suffix, 'audio/wav')
+                
+                # Create audio content part
+                audio_content = types.Part.from_bytes(
+                    data=audio_bytes,
+                    mime_type=mime_type
+                )
             
             # Prepare generation config
             generate_config = types.GenerateContentConfig(
@@ -437,14 +323,27 @@ class GeminiPlugin(PluginInterface):
             # Generate transcription
             self.logger.info(f"Transcribing with Gemini model: {exec_config['model']} (max_tokens: {exec_config['max_output_tokens']})")
             
-            response = self.client.models.generate_content(
-                model=exec_config["model"],
-                contents=contents,
-                config=generate_config
-            )
-            
-            # Extract text from response
-            transcribed_text = response.text if hasattr(response, 'text') else str(response)
+            # Use streaming or regular generation
+            if exec_config.get("use_streaming", False):
+                # Use streaming response
+                transcribed_text = ""
+                for chunk in self.client.models.generate_content_stream(
+                    model=exec_config["model"],
+                    contents=contents,
+                    config=generate_config
+                ):
+                    if hasattr(chunk, 'text'):
+                        transcribed_text += chunk.text
+                        # Could optionally yield chunks here for real-time processing
+                self.logger.info("Streaming transcription completed")
+            else:
+                # Use regular response (existing behavior)
+                response = self.client.models.generate_content(
+                    model=exec_config["model"],
+                    contents=contents,
+                    config=generate_config
+                )
+                transcribed_text = response.text if hasattr(response, 'text') else str(response)
             
             # Create result
             result = TranscriptionResult(
@@ -456,7 +355,9 @@ class GeminiPlugin(PluginInterface):
                     "temperature": exec_config["temperature"],
                     "top_p": exec_config["top_p"],
                     "max_output_tokens": exec_config["max_output_tokens"],
-                    "prompt": prompt[:100] + "..." if len(prompt) > 100 else prompt
+                    "prompt": prompt[:100] + "..." if len(prompt) > 100 else prompt,
+                    "use_file_upload": exec_config.get("use_file_upload", False),
+                    "use_streaming": exec_config.get("use_streaming", False)
                 }
             )
             
@@ -464,44 +365,415 @@ class GeminiPlugin(PluginInterface):
             return result
             
         finally:
+            # Clean up uploaded file if configured to do so
+            if uploaded_file and exec_config.get("delete_uploaded_files", True):
+                try:
+                    self._delete_uploaded_file(uploaded_file.name)
+                    # Remove from tracking list
+                    self.uploaded_files = [f for f in self.uploaded_files if f.name != uploaded_file.name]
+                except Exception as e:
+                    self.logger.warning(f"Failed to cleanup uploaded file: {e}")
+            
             # Clean up temporary file
             if temp_created:
                 try:
                     audio_path.unlink()
                 except Exception:
                     pass
-    
+
     def is_available(
         self
     ) -> bool:  # Returns True if the Gemini API is available
         """Check if Gemini API is available."""
         return GEMINI_AVAILABLE
-    
-    def cleanup(
-        self
-    ) -> None:
-        """Clean up resources."""
-        self.client = None
-        self.logger.info("Cleanup completed")
-    
-    def get_available_models(
-        self
-    ) -> List[str]:  # Returns list of available model names
-        """Get list of available audio-capable models."""
-        if self.config.get("auto_refresh_models", True) and self.client:
-            self.available_models = self._refresh_available_models()
-        return self.available_models
-    
-    def get_model_info(
-        self,
-        model_name: Optional[str] = None  # Model name to get info for, defaults to current model
-    ) -> Dict[str, Any]:  # Returns dict with model information
-        """Get information about a specific model including token limits."""
-        if model_name is None:
-            model_name = self.config.get("model", "gemini-2.5-flash")
+
+# %% ../nbs/plugin.ipynb 5
+@patch
+def _get_api_key(
+    self:GeminiPlugin
+) -> str:  # Returns the API key string
+    """Get API key from config or environment."""
+    api_key = self.config.get("api_key")
+    if not api_key:
+        api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("No API key provided. Set GEMINI_API_KEY environment variable or provide api_key in config")
+    return api_key
+
+@patch
+def _refresh_available_models(
+    self:GeminiPlugin
+) -> List[str]:  # Returns list of available model names
+    """Fetch and filter available models from Gemini API."""
+    try:
+        if not self.client:
+            return self.DEFAULT_AUDIO_MODELS
         
-        return {
-            "name": model_name,
-            "output_token_limit": self.model_token_limits.get(model_name, 65536),
-            "current_max_output_tokens": self.config.get("max_output_tokens", 65536)
-        }
+        # Get all models that support content generation
+        all_models = list(self.client.models.list())
+        gen_models = [model for model in all_models if 'generateContent' in model.supported_actions]
+        
+        # Extract model names and apply filters
+        model_filter = self.config.get("model_filter", [])
+        if not model_filter:
+            model_filter = ['tts', 'image', 'learn']  # Default exclusions
+        
+        filtered_names = []
+        self.model_token_limits = {}  # Reset token limits
+        
+        for model in gen_models:
+            model_name = model.name.removeprefix('models/')
+            # Skip if any filter keyword is in the model name
+            if not any(keyword in model_name.lower() for keyword in model_filter):
+                filtered_names.append(model_name)
+                # Store the output token limit for this model
+                self.model_token_limits[model_name] = model.output_token_limit
+        
+        # Sort with newest/best models first
+        filtered_names.sort(reverse=True)
+        
+        self.logger.info(f"Found {len(filtered_names)} audio-capable models")
+        return filtered_names if filtered_names else self.DEFAULT_AUDIO_MODELS
+        
+    except Exception as e:
+        self.logger.warning(f"Could not fetch models from API: {e}. Using defaults.")
+        return self.DEFAULT_AUDIO_MODELS
+
+@patch
+def _update_max_tokens_for_model(
+    self:GeminiPlugin,
+    model_name: str  # Model name to update tokens for
+) -> None:
+    """Update max_output_tokens config based on the model's token limit."""
+    if model_name in self.model_token_limits:
+        token_limit = self.model_token_limits[model_name]
+        # Update the config with the model's actual limit
+        self.config["max_output_tokens"] = token_limit
+        self.logger.info(f"Updated max_output_tokens to {token_limit} for model '{model_name}'")
+    else:
+        # Use a sensible default if we don't have the limit
+        default_limit = 65536  # Common default for newer models
+        self.config["max_output_tokens"] = default_limit
+        self.logger.info(f"Using default max_output_tokens of {default_limit} for model '{model_name}'")
+
+# %% ../nbs/plugin.ipynb 6
+@patch
+def update_config(
+    self:GeminiPlugin,
+    config: Dict[str, Any]  # New configuration values
+) -> None:
+    """Update plugin configuration, adjusting max_tokens if model changes."""
+    old_model = self.config.get("model")
+    
+    # Update config through parent class or directly
+    self.config.update(config)
+    
+    # If model changed, update max_output_tokens
+    new_model = self.config.get("model")
+    if new_model and new_model != old_model:
+        self._update_max_tokens_for_model(new_model)
+
+@patch
+def _prepare_audio(
+    self:GeminiPlugin,
+    audio: Union[AudioData, str, Path]  # Audio data object or path to audio file
+) -> Tuple[Path, bool]:  # Returns tuple of (processed audio path, whether temp file was created)
+    """Prepare audio file for upload.
+    
+    Returns:
+        Tuple of (audio_path, is_temp_file)
+    """
+    temp_created = False
+    
+    if isinstance(audio, (str, Path)):
+        audio_path = Path(audio)
+    elif isinstance(audio, AudioData):
+        # Save AudioData to temporary file
+        import soundfile as sf
+        temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        
+        audio_array = audio.samples
+        # Convert to mono if stereo
+        if audio_array.ndim > 1:
+            audio_array = audio_array.mean(axis=1)
+        
+        # Ensure float32 and normalized
+        if audio_array.dtype != np.float32:
+            audio_array = audio_array.astype(np.float32)
+        if audio_array.max() > 1.0:
+            audio_array = audio_array / np.abs(audio_array).max()
+        
+        sf.write(temp_file.name, audio_array, audio.sample_rate)
+        audio_path = Path(temp_file.name)
+        temp_created = True
+    else:
+        raise ValueError(f"Unsupported audio input type: {type(audio)}")
+    
+    # Optionally downsample audio
+    if self.config.get("downsample_audio", False) and FFMPEG_AVAILABLE:
+        try:
+            downsampled = audio_path.with_stem(f"{audio_path.stem}_downsampled")
+            downsample_audio(
+                audio_path,
+                downsampled,
+                sample_rate=self.config.get("downsample_rate", 16000),
+                channels=self.config.get("downsample_channels", 1)
+            )
+            
+            # Clean up original temp file if created
+            if temp_created:
+                audio_path.unlink()
+            
+            audio_path = downsampled
+            temp_created = True
+            self.logger.info(f"Downsampled audio to {self.config['downsample_rate']}Hz")
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to downsample audio: {e}")
+    
+    return audio_path, temp_created
+
+@patch
+def _upload_audio_file(
+    self:GeminiPlugin,
+    audio_path: Path  # Path to audio file to upload
+) -> Any:  # Returns uploaded file object
+    """Upload audio file to Gemini API.
+    
+    Returns:
+        Uploaded file object
+    """
+    try:
+        self.logger.info(f"Uploading audio file: {audio_path}")
+        uploaded_file = self.client.files.upload(file=audio_path)
+        self.uploaded_files.append(uploaded_file)  # Track for cleanup
+        self.logger.info(f"Successfully uploaded file: {uploaded_file.name}")
+        return uploaded_file
+    except Exception as e:
+        self.logger.error(f"Failed to upload audio file: {e}")
+        raise
+
+@patch
+def _delete_uploaded_file(
+    self:GeminiPlugin,
+    file_name: str  # Name of file to delete
+) -> None:
+    """Delete an uploaded file from Gemini API."""
+    try:
+        self.client.files.delete(name=file_name)
+        self.logger.info(f"Deleted uploaded file: {file_name}")
+    except Exception as e:
+        self.logger.warning(f"Failed to delete uploaded file {file_name}: {e}")
+
+# %% ../nbs/plugin.ipynb 7
+@patch
+def cleanup(
+    self:GeminiPlugin
+) -> None:
+    """Clean up resources."""
+    # Clean up any remaining uploaded files
+    if self.config.get("delete_uploaded_files", True):
+        for uploaded_file in self.uploaded_files:
+            try:
+                self._delete_uploaded_file(uploaded_file.name)
+            except Exception as e:
+                self.logger.warning(f"Failed to delete file during cleanup: {e}")
+    
+    self.uploaded_files = []
+    self.client = None
+    self.logger.info("Cleanup completed")
+
+@patch
+def get_available_models(
+    self:GeminiPlugin
+) -> List[str]:  # Returns list of available model names
+    """Get list of available audio-capable models."""
+    if self.config.get("auto_refresh_models", True) and self.client:
+        self.available_models = self._refresh_available_models()
+    return self.available_models
+
+@patch
+def get_model_info(
+    self:GeminiPlugin,
+    model_name: Optional[str] = None  # Model name to get info for, defaults to current model
+) -> Dict[str, Any]:  # Returns dict with model information
+    """Get information about a specific model including token limits."""
+    if model_name is None:
+        model_name = self.config.get("model", "gemini-2.5-flash")
+    
+    return {
+        "name": model_name,
+        "output_token_limit": self.model_token_limits.get(model_name, 65536),
+        "current_max_output_tokens": self.config.get("max_output_tokens", 65536)
+    }
+
+# %% ../nbs/plugin.ipynb 8
+from typing import Generator
+
+@patch
+def supports_streaming(
+    self:GeminiPlugin
+) -> bool:  # Returns True if streaming is supported
+    """Check if this plugin supports streaming transcription.
+    
+    Returns:
+        bool: True, as Gemini supports streaming transcription
+    """
+    return True
+
+@patch  
+def execute_stream(
+    self:GeminiPlugin,
+    audio: Union[AudioData, str, Path],  # Audio data object or path to audio file
+    **kwargs  # Additional arguments to override config
+) -> Generator[str, None, TranscriptionResult]:  # Yields text chunks, returns final result
+    """Stream transcription results chunk by chunk.
+    
+    This method streams transcription chunks in real-time as they are generated
+    by the Gemini API.
+    
+    Args:
+        audio: Audio data or path to audio file
+        **kwargs: Additional plugin-specific parameters
+        
+    Yields:
+        str: Partial transcription text chunks as they become available
+        
+    Returns:
+        TranscriptionResult: Final complete transcription with metadata
+        
+    Example:
+        >>> # Stream transcription chunks in real-time
+        >>> for chunk in plugin.execute_stream(audio_file):
+        ...     print(chunk, end="", flush=True)
+    """
+    if not self.client:
+        raise RuntimeError("Plugin not initialized. Call initialize() first.")
+    
+    # Force streaming mode in config
+    kwargs['use_streaming'] = True
+    
+    # Check if model is being overridden at execution time
+    if "model" in kwargs and kwargs["model"] != self.config.get("model"):
+        self._update_max_tokens_for_model(kwargs["model"])
+    
+    # Prepare audio file
+    audio_path, temp_created = self._prepare_audio(audio)
+    uploaded_file = None
+    
+    try:
+        # Merge runtime kwargs with config
+        exec_config = {**self.config, **kwargs}
+        
+        # Decide whether to upload file or embed in request
+        if exec_config.get("use_file_upload", False):
+            # Upload audio file to Gemini API
+            uploaded_file = self._upload_audio_file(audio_path)
+            audio_content = uploaded_file
+        else:
+            # Read audio file and embed in request
+            with open(audio_path, 'rb') as f:
+                audio_bytes = f.read()
+            
+            # Determine MIME type
+            suffix = audio_path.suffix.lower()
+            mime_map = {
+                '.wav': 'audio/wav',
+                '.mp3': 'audio/mp3',
+                '.aiff': 'audio/aiff',
+                '.aac': 'audio/aac',
+                '.ogg': 'audio/ogg',
+                '.flac': 'audio/flac'
+            }
+            mime_type = mime_map.get(suffix, 'audio/wav')
+            
+            # Create audio content part
+            audio_content = types.Part.from_bytes(
+                data=audio_bytes,
+                mime_type=mime_type
+            )
+        
+        # Prepare generation config
+        generate_config = types.GenerateContentConfig(
+            response_mime_type=exec_config["response_mime_type"],
+            temperature=exec_config["temperature"],
+            top_p=exec_config["top_p"],
+            max_output_tokens=exec_config["max_output_tokens"],
+            seed=exec_config.get("seed"),
+            safety_settings=[
+                types.SafetySetting(
+                    category="HARM_CATEGORY_HATE_SPEECH",
+                    threshold=exec_config["safety_settings"]
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                    threshold=exec_config["safety_settings"]
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    threshold=exec_config["safety_settings"]
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_HARASSMENT",
+                    threshold=exec_config["safety_settings"]
+                )
+            ]
+        )
+        
+        # Prepare contents
+        prompt = exec_config["prompt"]
+        contents = [prompt, audio_content]
+        
+        # Generate transcription with streaming
+        self.logger.info(f"Streaming transcription with Gemini model: {exec_config['model']} (max_tokens: {exec_config['max_output_tokens']})")
+        
+        transcribed_text = ""
+        chunks_yielded = 0
+        
+        # Stream chunks as they arrive
+        for chunk in self.client.models.generate_content_stream(
+            model=exec_config["model"],
+            contents=contents,
+            config=generate_config
+        ):
+            if hasattr(chunk, 'text'):
+                chunk_text = chunk.text
+                transcribed_text += chunk_text
+                chunks_yielded += 1
+                yield chunk_text  # Yield each chunk in real-time
+        
+        self.logger.info(f"Streaming completed: {chunks_yielded} chunks, {len(transcribed_text.split())} words")
+        
+        # Return final result
+        return TranscriptionResult(
+            text=transcribed_text.strip(),
+            confidence=None,  # Gemini doesn't provide confidence scores
+            segments=None,  # Gemini doesn't provide segments by default
+            metadata={
+                "model": exec_config["model"],
+                "temperature": exec_config["temperature"],
+                "top_p": exec_config["top_p"],
+                "max_output_tokens": exec_config["max_output_tokens"],
+                "prompt": prompt[:100] + "..." if len(prompt) > 100 else prompt,
+                "use_file_upload": exec_config.get("use_file_upload", False),
+                "use_streaming": True,
+                "streaming_chunks": chunks_yielded
+            }
+        )
+        
+    finally:
+        # Clean up uploaded file if configured to do so
+        if uploaded_file and exec_config.get("delete_uploaded_files", True):
+            try:
+                self._delete_uploaded_file(uploaded_file.name)
+                # Remove from tracking list
+                self.uploaded_files = [f for f in self.uploaded_files if f.name != uploaded_file.name]
+            except Exception as e:
+                self.logger.warning(f"Failed to cleanup uploaded file: {e}")
+        
+        # Clean up temporary file
+        if temp_created:
+            try:
+                audio_path.unlink()
+            except Exception:
+                pass

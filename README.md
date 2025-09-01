@@ -45,6 +45,147 @@ from cjm_transcription_plugin_gemini.plugin import (
 )
 ```
 
+#### Functions
+
+``` python
+@patch
+def _get_api_key(
+    self:GeminiPlugin
+) -> str:  # Returns the API key string
+    "Get API key from config or environment."
+```
+
+``` python
+@patch
+def _refresh_available_models(
+    self:GeminiPlugin
+) -> List[str]:  # Returns list of available model names
+    "Fetch and filter available models from Gemini API."
+```
+
+``` python
+@patch
+def _update_max_tokens_for_model(
+    self:GeminiPlugin,
+    model_name: str  # Model name to update tokens for
+) -> None
+    "Update max_output_tokens config based on the model's token limit."
+```
+
+``` python
+@patch
+def update_config(
+    self:GeminiPlugin,
+    config: Dict[str, Any]  # New configuration values
+) -> None
+    "Update plugin configuration, adjusting max_tokens if model changes."
+```
+
+``` python
+@patch
+def _prepare_audio(
+    self:GeminiPlugin,
+    audio: Union[AudioData, str, Path]  # Audio data object or path to audio file
+) -> Tuple[Path, bool]:  # Returns tuple of (processed audio path, whether temp file was created)
+    """
+    Prepare audio file for upload.
+    
+    Returns:
+        Tuple of (audio_path, is_temp_file)
+    """
+```
+
+``` python
+@patch
+def _upload_audio_file(
+    self:GeminiPlugin,
+    audio_path: Path  # Path to audio file to upload
+) -> Any:  # Returns uploaded file object
+    """
+    Upload audio file to Gemini API.
+    
+    Returns:
+        Uploaded file object
+    """
+```
+
+``` python
+@patch
+def _delete_uploaded_file(
+    self:GeminiPlugin,
+    file_name: str  # Name of file to delete
+) -> None
+    "Delete an uploaded file from Gemini API."
+```
+
+``` python
+@patch
+def cleanup(
+    self:GeminiPlugin
+) -> None
+    "Clean up resources."
+```
+
+``` python
+@patch
+def get_available_models(
+    self:GeminiPlugin
+) -> List[str]:  # Returns list of available model names
+    "Get list of available audio-capable models."
+```
+
+``` python
+@patch
+def get_model_info(
+    self:GeminiPlugin,
+    model_name: Optional[str] = None  # Model name to get info for, defaults to current model
+) -> Dict[str, Any]:  # Returns dict with model information
+    "Get information about a specific model including token limits."
+```
+
+``` python
+@patch
+def supports_streaming(
+    self:GeminiPlugin
+) -> bool:  # Returns True if streaming is supported
+    """
+    Check if this plugin supports streaming transcription.
+    
+    Returns:
+        bool: True, as Gemini supports streaming transcription
+    """
+```
+
+``` python
+@patch
+def execute_stream(
+    self:GeminiPlugin,
+    audio: Union[AudioData, str, Path],  # Audio data object or path to audio file
+    **kwargs  # Additional arguments to override config
+) -> Generator[str, None, TranscriptionResult]:  # Yields text chunks, returns final result
+    """
+    Stream transcription results chunk by chunk.
+    
+    This method streams transcription chunks in real-time as they are generated
+    by the Gemini API.
+    
+    Args:
+        audio: Audio data or path to audio file
+        **kwargs: Additional plugin-specific parameters
+        
+    Yields:
+        str: Partial transcription text chunks as they become available
+        
+    Returns:
+        TranscriptionResult: Final complete transcription with metadata
+        
+    Example:
+        >>> # Stream transcription chunks in real-time
+        >>> for chunk in plugin.execute_stream(audio_file):
+        ...     print(chunk, end="", flush=True)
+    """
+```
+
 #### Classes
 
 ``` python
@@ -56,6 +197,7 @@ class GeminiPlugin:
         self.client = None
         self.available_models = []
         self.model_token_limits = {}  # Store model name -> output_token_limit mapping
+        self.uploaded_files = []  # Track uploaded files for cleanup
     
     @property
     def name(
@@ -70,6 +212,7 @@ class GeminiPlugin:
             self.client = None
             self.available_models = []
             self.model_token_limits = {}  # Store model name -> output_token_limit mapping
+            self.uploaded_files = []  # Track uploaded files for cleanup
         
         @property
         def name(
@@ -108,12 +251,6 @@ class GeminiPlugin:
         ) -> None
         "Initialize the plugin with configuration."
     
-    def update_config(
-            self,
-            config: Dict[str, Any]  # New configuration values
-        ) -> None
-        "Update plugin configuration, adjusting max_tokens if model changes."
-    
     def execute(
             self,
             audio: Union[AudioData, str, Path],  # Audio data object or path to audio file
@@ -125,20 +262,4 @@ class GeminiPlugin:
             self
         ) -> bool:  # Returns True if the Gemini API is available
         "Check if Gemini API is available."
-    
-    def cleanup(
-            self
-        ) -> None
-        "Clean up resources."
-    
-    def get_available_models(
-            self
-        ) -> List[str]:  # Returns list of available model names
-        "Get list of available audio-capable models."
-    
-    def get_model_info(
-            self,
-            model_name: Optional[str] = None  # Model name to get info for, defaults to current model
-        ) -> Dict[str, Any]:  # Returns dict with model information
-        "Get information about a specific model including token limits."
 ```
