@@ -55,6 +55,7 @@ class GeminiPlugin:
         self.config = {}
         self.client = None
         self.available_models = []
+        self.model_token_limits = {}  # Store model name -> output_token_limit mapping
     
     @property
     def name(
@@ -68,6 +69,7 @@ class GeminiPlugin:
             self.config = {}
             self.client = None
             self.available_models = []
+            self.model_token_limits = {}  # Store model name -> output_token_limit mapping
         
         @property
         def name(
@@ -106,6 +108,12 @@ class GeminiPlugin:
         ) -> None
         "Initialize the plugin with configuration."
     
+    def update_config(
+            self,
+            config: Dict[str, Any]  # New configuration values
+        ) -> None
+        "Update plugin configuration, adjusting max_tokens if model changes."
+    
     def execute(
             self,
             audio: Union[AudioData, str, Path],  # Audio data object or path to audio file
@@ -127,4 +135,10 @@ class GeminiPlugin:
             self
         ) -> List[str]:  # Returns list of available model names
         "Get list of available audio-capable models."
+    
+    def get_model_info(
+            self,
+            model_name: Optional[str] = None  # Model name to get info for, defaults to current model
+        ) -> Dict[str, Any]:  # Returns dict with model information
+        "Get information about a specific model including token limits."
 ```

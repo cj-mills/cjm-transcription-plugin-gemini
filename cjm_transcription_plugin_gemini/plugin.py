@@ -55,6 +55,7 @@ class GeminiPlugin(PluginInterface):
         self.config = {}
         self.client = None
         self.available_models = []
+        self.model_token_limits = {}  # Store model name -> output_token_limit mapping
     
     @property
     def name(
@@ -81,6 +82,10 @@ class GeminiPlugin(PluginInterface):
         self
     ) -> Dict[str, Any]:  # Returns JSON schema for configuration validation
         """Return configuration schema for Gemini."""
+        # Get the current model's token limit for max value
+        current_model = self.config.get("model", "gemini-2.5-flash")
+        max_tokens = self.model_token_limits.get(current_model, 65536)
+        
         return {
             "$schema": "http://json-schema.org/draft-07/schema#",
             "type": "object",
@@ -90,7 +95,7 @@ class GeminiPlugin(PluginInterface):
                     "type": "string",
                     "default": "gemini-2.5-flash",
                     "description": "Gemini model to use for transcription",
-                    "enum": self.DEFAULT_AUDIO_MODELS  # Will be updated dynamically
+                    "enum": self.available_models if self.available_models else self.DEFAULT_AUDIO_MODELS
                 },
                 "api_key": {
                     "type": ["string", "null"],
@@ -119,9 +124,9 @@ class GeminiPlugin(PluginInterface):
                 "max_output_tokens": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 65536,
-                    "default": 65536,
-                    "description": "Maximum number of output tokens"
+                    "maximum": max_tokens,
+                    "default": max_tokens,
+                    "description": f"Maximum number of output tokens (max for {current_model}: {max_tokens})"
                 },
                 "seed": {
                     "type": ["integer", "null"],
@@ -209,11 +214,15 @@ class GeminiPlugin(PluginInterface):
                 model_filter = ['tts', 'image', 'learn']  # Default exclusions
             
             filtered_names = []
+            self.model_token_limits = {}  # Reset token limits
+            
             for model in gen_models:
                 model_name = model.name.removeprefix('models/')
                 # Skip if any filter keyword is in the model name
                 if not any(keyword in model_name.lower() for keyword in model_filter):
                     filtered_names.append(model_name)
+                    # Store the output token limit for this model
+                    self.model_token_limits[model_name] = model.output_token_limit
             
             # Sort with newest/best models first
             filtered_names.sort(reverse=True)
@@ -224,6 +233,22 @@ class GeminiPlugin(PluginInterface):
         except Exception as e:
             self.logger.warning(f"Could not fetch models from API: {e}. Using defaults.")
             return self.DEFAULT_AUDIO_MODELS
+    
+    def _update_max_tokens_for_model(
+        self,
+        model_name: str  # Model name to update tokens for
+    ) -> None:
+        """Update max_output_tokens config based on the model's token limit."""
+        if model_name in self.model_token_limits:
+            token_limit = self.model_token_limits[model_name]
+            # Update the config with the model's actual limit
+            self.config["max_output_tokens"] = token_limit
+            self.logger.info(f"Updated max_output_tokens to {token_limit} for model '{model_name}'")
+        else:
+            # Use a sensible default if we don't have the limit
+            default_limit = 65536  # Common default for newer models
+            self.config["max_output_tokens"] = default_limit
+            self.logger.info(f"Using default max_output_tokens of {default_limit} for model '{model_name}'")
     
     def initialize(
         self,
@@ -252,12 +277,30 @@ class GeminiPlugin(PluginInterface):
                 schema["properties"]["model"]["enum"] = self.available_models
             else:
                 self.available_models = self.DEFAULT_AUDIO_MODELS
+            
+            # Update max_output_tokens based on selected model's limit
+            self._update_max_tokens_for_model(self.config['model'])
                 
             self.logger.info(f"Initialized Gemini plugin with model '{self.config['model']}'")
             
         except Exception as e:
             self.logger.error(f"Failed to initialize Gemini client: {e}")
             raise
+    
+    def update_config(
+        self,
+        config: Dict[str, Any]  # New configuration values
+    ) -> None:
+        """Update plugin configuration, adjusting max_tokens if model changes."""
+        old_model = self.config.get("model")
+        
+        # Update config through parent class or directly
+        self.config.update(config)
+        
+        # If model changed, update max_output_tokens
+        new_model = self.config.get("model")
+        if new_model and new_model != old_model:
+            self._update_max_tokens_for_model(new_model)
     
     def _prepare_audio(
         self,
@@ -327,6 +370,10 @@ class GeminiPlugin(PluginInterface):
         if not self.client:
             raise RuntimeError("Plugin not initialized. Call initialize() first.")
         
+        # Check if model is being overridden at execution time
+        if "model" in kwargs and kwargs["model"] != self.config.get("model"):
+            self._update_max_tokens_for_model(kwargs["model"])
+        
         # Prepare audio file
         audio_path, temp_created = self._prepare_audio(audio)
         
@@ -388,7 +435,7 @@ class GeminiPlugin(PluginInterface):
             contents = [prompt, audio_content]
             
             # Generate transcription
-            self.logger.info(f"Transcribing with Gemini model: {exec_config['model']}")
+            self.logger.info(f"Transcribing with Gemini model: {exec_config['model']} (max_tokens: {exec_config['max_output_tokens']})")
             
             response = self.client.models.generate_content(
                 model=exec_config["model"],
@@ -408,6 +455,7 @@ class GeminiPlugin(PluginInterface):
                     "model": exec_config["model"],
                     "temperature": exec_config["temperature"],
                     "top_p": exec_config["top_p"],
+                    "max_output_tokens": exec_config["max_output_tokens"],
                     "prompt": prompt[:100] + "..." if len(prompt) > 100 else prompt
                 }
             )
@@ -443,3 +491,17 @@ class GeminiPlugin(PluginInterface):
         if self.config.get("auto_refresh_models", True) and self.client:
             self.available_models = self._refresh_available_models()
         return self.available_models
+    
+    def get_model_info(
+        self,
+        model_name: Optional[str] = None  # Model name to get info for, defaults to current model
+    ) -> Dict[str, Any]:  # Returns dict with model information
+        """Get information about a specific model including token limits."""
+        if model_name is None:
+            model_name = self.config.get("model", "gemini-2.5-flash")
+        
+        return {
+            "name": model_name,
+            "output_token_limit": self.model_token_limits.get(model_name, 65536),
+            "current_max_output_tokens": self.config.get("max_output_tokens", 65536)
+        }
