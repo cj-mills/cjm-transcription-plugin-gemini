@@ -1,0 +1,9 @@
+project:
+  output-dir: _docs
+
+website:
+  title: "cjm-transcription-plugin-gemini"
+  site-url: "https://cj-mills.github.io/cjm-transcription-plugin-gemini"
+  description: "Google Gemini API plugin for the cjm-transcription-plugin-system library - provides speech-to-text transcription with configurable model selection and parameter control."
+  repo-branch: main
+  repo-url: "https://github.com/cj-mills/cjm-transcription-plugin-gemini"
