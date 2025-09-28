@@ -81,13 +81,16 @@ class GeminiPlugin(PluginInterface):
         """Return list of supported audio file formats."""
         return ["wav", "mp3", "aiff", "aac", "ogg", "flac"]
 
+    @staticmethod
     def get_config_schema(
-        self
+        current_model: str="gemini-2.5-flash",
+        max_tokens: int=65536,
+        available_models: List[str]=None
     ) -> Dict[str, Any]:  # Returns JSON schema for configuration validation
         """Return configuration schema for Gemini."""
-        # Get the current model's token limit for max value
-        current_model = self.config.get("model", "gemini-2.5-flash")
-        max_tokens = self.model_token_limits.get(current_model, 65536)
+        
+        if not available_models:
+            available_models=GeminiPlugin.DEFAULT_AUDIO_MODELS
         
         return {
             "$schema": "http://json-schema.org/draft-07/schema#",
@@ -98,7 +101,7 @@ class GeminiPlugin(PluginInterface):
                     "type": "string",
                     "default": "gemini-2.5-flash",
                     "description": "Gemini model to use for transcription",
-                    "enum": self.available_models if self.available_models else self.DEFAULT_AUDIO_MODELS
+                    "enum": available_models
                 },
                 "api_key": {
                     "type": ["string", "null"],

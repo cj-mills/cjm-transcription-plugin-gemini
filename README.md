@@ -236,7 +236,9 @@ class GeminiPlugin:
         "Return list of supported audio file formats."
     
     def get_config_schema(
-            self
+            current_model: str="gemini-2.5-flash",
+            max_tokens: int=65536,
+            available_models: List[str]=None
         ) -> Dict[str, Any]:  # Returns JSON schema for configuration validation
         "Return configuration schema for Gemini."
     
