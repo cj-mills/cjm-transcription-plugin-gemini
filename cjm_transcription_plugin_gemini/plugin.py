@@ -30,11 +30,12 @@ try:
 except ImportError:
     FFMPEG_AVAILABLE = False
     
-from cjm_transcription_plugin_system.plugin_interface import PluginInterface
+# Import domain-specific plugin interface from migrated system
+from cjm_transcription_plugin_system.plugin_interface import TranscriptionPlugin
 from cjm_transcription_plugin_system.core import AudioData, TranscriptionResult
 
 # %% ../nbs/plugin.ipynb 4
-class GeminiPlugin(PluginInterface):
+class GeminiPlugin(TranscriptionPlugin):
     """Google Gemini API transcription plugin."""
     
     # Default audio-capable models (can be overridden)
