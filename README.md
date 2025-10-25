@@ -87,12 +87,7 @@ def _prepare_audio(
     self:GeminiPlugin,
     audio: Union[AudioData, str, Path]  # Audio data object or path to audio file
 ) -> Tuple[Path, bool]:  # Returns tuple of (processed audio path, whether temp file was created)
-    """
-    Prepare audio file for upload.
-    
-    Returns:
-        Tuple of (audio_path, is_temp_file)
-    """
+    "Prepare audio file for upload."
 ```
 
 ``` python
@@ -101,12 +96,7 @@ def _upload_audio_file(
     self:GeminiPlugin,
     audio_path: Path  # Path to audio file to upload
 ) -> Any:  # Returns uploaded file object
-    """
-    Upload audio file to Gemini API.
-    
-    Returns:
-        Uploaded file object
-    """
+    "Upload audio file to Gemini API."
 ```
 
 ``` python
@@ -148,12 +138,7 @@ def get_model_info(
 def supports_streaming(
     self:GeminiPlugin
 ) -> bool:  # Returns True if streaming is supported
-    """
-    Check if this plugin supports streaming transcription.
-    
-    Returns:
-        bool: True, as Gemini supports streaming transcription
-    """
+    "Check if this plugin supports streaming transcription."
 ```
 
 ``` python
@@ -163,27 +148,7 @@ def execute_stream(
     audio: Union[AudioData, str, Path],  # Audio data object or path to audio file
     **kwargs  # Additional arguments to override config
 ) -> Generator[str, None, TranscriptionResult]:  # Yields text chunks, returns final result
-    """
-    Stream transcription results chunk by chunk.
-    
-    This method streams transcription chunks in real-time as they are generated
-    by the Gemini API.
-    
-    Args:
-        audio: Audio data or path to audio file
-        **kwargs: Additional plugin-specific parameters
-        
-    Yields:
-        str: Partial transcription text chunks as they become available
-        
-    Returns:
-        TranscriptionResult: Final complete transcription with metadata
-        
-    Example:
-        >>> # Stream transcription chunks in real-time
-        >>> for chunk in plugin.execute_stream(audio_file):
-        ...     print(chunk, end="", flush=True)
-    """
+    "Stream transcription results chunk by chunk."
 ```
 
 #### Classes
