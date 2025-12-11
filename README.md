@@ -41,6 +41,7 @@ Detailed documentation for each module in the project:
 
 ``` python
 from cjm_transcription_plugin_gemini.plugin import (
+    GeminiPluginConfig,
     GeminiPlugin
 )
 ```
@@ -51,7 +52,7 @@ from cjm_transcription_plugin_gemini.plugin import (
 @patch
 def _get_api_key(
     self:GeminiPlugin
-) -> str:  # Returns the API key string
+) -> str:  # The API key string
     "Get API key from config or environment."
 ```
 
@@ -59,7 +60,7 @@ def _get_api_key(
 @patch
 def _refresh_available_models(
     self:GeminiPlugin
-) -> List[str]:  # Returns list of available model names
+) -> List[str]:  # List of available model names
     "Fetch and filter available models from Gemini API."
 ```
 
@@ -76,7 +77,7 @@ def _update_max_tokens_for_model(
 @patch
 def update_config(
     self:GeminiPlugin,
-    config: Dict[str, Any]  # New configuration values
+    config: Union[Dict[str, Any], GeminiPluginConfig]  # New configuration values
 ) -> None
     "Update plugin configuration, adjusting max_tokens if model changes."
 ```
@@ -86,7 +87,7 @@ def update_config(
 def _prepare_audio(
     self:GeminiPlugin,
     audio: Union[AudioData, str, Path]  # Audio data object or path to audio file
-) -> Tuple[Path, bool]:  # Returns tuple of (processed audio path, whether temp file was created)
+) -> Tuple[Path, bool]:  # Tuple of (processed audio path, whether temp file was created)
     "Prepare audio file for upload."
 ```
 
@@ -95,7 +96,7 @@ def _prepare_audio(
 def _upload_audio_file(
     self:GeminiPlugin,
     audio_path: Path  # Path to audio file to upload
-) -> Any:  # Returns uploaded file object
+) -> Any:  # Uploaded file object
     "Upload audio file to Gemini API."
 ```
 
@@ -120,7 +121,7 @@ def cleanup(
 @patch
 def get_available_models(
     self:GeminiPlugin
-) -> List[str]:  # Returns list of available model names
+) -> List[str]:  # List of available model names
     "Get list of available audio-capable models."
 ```
 
@@ -129,7 +130,7 @@ def get_available_models(
 def get_model_info(
     self:GeminiPlugin,
     model_name: Optional[str] = None  # Model name to get info for, defaults to current model
-) -> Dict[str, Any]:  # Returns dict with model information
+) -> Dict[str, Any]:  # Dict with model information
     "Get information about a specific model including token limits."
 ```
 
@@ -137,7 +138,7 @@ def get_model_info(
 @patch
 def supports_streaming(
     self:GeminiPlugin
-) -> bool:  # Returns True if streaming is supported
+) -> bool:  # True if streaming is supported
     "Check if this plugin supports streaming transcription."
 ```
 
@@ -154,79 +155,78 @@ def execute_stream(
 #### Classes
 
 ``` python
+@dataclass
+class GeminiPluginConfig:
+    "Configuration for Gemini transcription plugin."
+    
+    model: str = field(...)
+    api_key: Optional[str] = field(...)
+    prompt: str = field(...)
+    temperature: float = field(...)
+    top_p: float = field(...)
+    max_output_tokens: int = field(...)
+    seed: Optional[int] = field(...)
+    response_mime_type: str = field(...)
+    downsample_audio: bool = field(...)
+    downsample_rate: int = field(...)
+    downsample_channels: int = field(...)
+    safety_settings: str = field(...)
+    auto_refresh_models: bool = field(...)
+    model_filter: List[str] = field(...)
+    use_file_upload: bool = field(...)
+    use_streaming: bool = field(...)
+    delete_uploaded_files: bool = field(...)
+```
+
+``` python
 class GeminiPlugin:
     def __init__(self):
         """Initialize the Gemini plugin with default configuration."""
         self.logger = logging.getLogger(f"{__name__}.{type(self).__name__}")
-        self.config = {}
-        self.client = None
-        self.available_models = []
-        self.model_token_limits = {}  # Store model name -> output_token_limit mapping
-        self.uploaded_files = []  # Track uploaded files for cleanup
-    
-    @property
-    def name(
-        self
-    ) -> str:  # Returns the plugin name identifier
+        self.config: GeminiPluginConfig = None
     "Google Gemini API transcription plugin."
     
     def __init__(self):
             """Initialize the Gemini plugin with default configuration."""
             self.logger = logging.getLogger(f"{__name__}.{type(self).__name__}")
-            self.config = {}
-            self.client = None
-            self.available_models = []
-            self.model_token_limits = {}  # Store model name -> output_token_limit mapping
-            self.uploaded_files = []  # Track uploaded files for cleanup
-        
-        @property
-        def name(
-            self
-        ) -> str:  # Returns the plugin name identifier
+            self.config: GeminiPluginConfig = None
         "Initialize the Gemini plugin with default configuration."
     
     def name(
             self
-        ) -> str:  # Returns the plugin name identifier
+        ) -> str:  # Plugin name identifier
         "Return the plugin name identifier."
     
     def version(
             self
-        ) -> str:  # Returns the plugin version string
+        ) -> str:  # Plugin version string
         "Return the plugin version string."
     
     def supported_formats(
             self
-        ) -> List[str]:  # Returns list of supported audio formats
+        ) -> List[str]:  # List of supported audio formats
         "Return list of supported audio file formats."
-    
-    def get_config_schema(
-            current_model: str="gemini-2.5-flash",
-            max_tokens: int=65536,
-            available_models: List[str]=None
-        ) -> Dict[str, Any]:  # Returns JSON schema for configuration validation
-        "Return configuration schema for Gemini."
     
     def get_current_config(
             self
-        ) -> Dict[str, Any]:  # Returns the merged configuration dictionary
+        ) -> GeminiPluginConfig:  # Current configuration dataclass
         "Return current configuration."
     
     def initialize(
             self,
-            config: Optional[Dict[str, Any]] = None  # Configuration dictionary to override defaults
+            config: Optional[Any] = None  # Configuration dataclass, dict, or None
         ) -> None
         "Initialize the plugin with configuration."
     
     def execute(
             self,
             audio: Union[AudioData, str, Path],  # Audio data object or path to audio file
-            **kwargs # Additional arguments to override config
-        ) -> TranscriptionResult:  # Returns transcription result object
+            **kwargs  # Additional arguments to override config
+        ) -> TranscriptionResult:  # Transcription result object
         "Transcribe audio using Gemini."
     
     def is_available(
             self
-        ) -> bool:  # Returns True if the Gemini API is available
+        ) -> bool:  # True if the Gemini API is available
         "Check if Gemini API is available."
 ```
