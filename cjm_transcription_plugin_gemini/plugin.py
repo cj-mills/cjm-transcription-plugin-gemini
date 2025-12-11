@@ -236,6 +236,11 @@ class GeminiPlugin(TranscriptionPlugin):
         """Return current configuration."""
         return self.config
 
+    @staticmethod
+    def get_config_dataclass() -> GeminiPluginConfig: # Configuration dataclass
+        """Return dataclass describing the plugin's configuration options."""
+        return GeminiPluginConfig
+    
     def initialize(
         self,
         config: Optional[Any] = None  # Configuration dataclass, dict, or None

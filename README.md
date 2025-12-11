@@ -212,6 +212,16 @@ class GeminiPlugin:
         ) -> GeminiPluginConfig:  # Current configuration dataclass
         "Return current configuration."
     
+    def get_config_dataclass() -> GeminiPluginConfig: # Configuration dataclass
+            """Return dataclass describing the plugin's configuration options."""
+            return GeminiPluginConfig
+        
+        def initialize(
+            self,
+            config: Optional[Any] = None  # Configuration dataclass, dict, or None
+        ) -> None
+        "Return dataclass describing the plugin's configuration options."
+    
     def initialize(
             self,
             config: Optional[Any] = None  # Configuration dataclass, dict, or None
