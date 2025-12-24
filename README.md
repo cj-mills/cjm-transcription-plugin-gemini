@@ -12,14 +12,16 @@ pip install cjm_transcription_plugin_gemini
 ## Project Structure
 
     nbs/
+    ├── meta.ipynb   # Metadata introspection for the Gemini plugin used by cjm-ctl to generate the registration manifest.
     └── plugin.ipynb # Plugin implementation for Google Gemini API transcription
 
-Total: 1 notebook across 1 directory
+Total: 2 notebooks across 1 directory
 
 ## Module Dependencies
 
 ``` mermaid
 graph LR
+    meta[meta<br/>Metadata]
     plugin[plugin<br/>Gemini Plugin]
 ```
 
@@ -32,6 +34,37 @@ No CLI commands found in this project.
 ## Module Overview
 
 Detailed documentation for each module in the project:
+
+### Metadata (`meta.ipynb`)
+
+> Metadata introspection for the Gemini plugin used by cjm-ctl to
+> generate the registration manifest.
+
+#### Import
+
+``` python
+from cjm_transcription_plugin_gemini.meta import (
+    get_plugin_metadata
+)
+```
+
+#### Functions
+
+``` python
+def get_plugin_metadata() -> Dict[str, Any]: # Plugin metadata for manifest generation
+    """Return metadata required to register this plugin with the PluginManager."""
+    # Calculate default DB path relative to the environment
+    base_path = os.path.dirname(os.path.dirname(sys.executable))
+    data_dir = os.path.join(base_path, "data")
+    db_path = os.path.join(data_dir, "gemini_transcriptions.db")
+    
+    # Ensure data directory exists
+    os.makedirs(data_dir, exist_ok=True)
+
+    return {
+        "name": "cjm-transcription-plugin-gemini",
+    "Return metadata required to register this plugin with the PluginManager."
+```
 
 ### Gemini Plugin (`plugin.ipynb`)
 
@@ -111,14 +144,6 @@ def _delete_uploaded_file(
 
 ``` python
 @patch
-def cleanup(
-    self:GeminiPlugin
-) -> None
-    "Clean up resources."
-```
-
-``` python
-@patch
 def get_available_models(
     self:GeminiPlugin
 ) -> List[str]:  # List of available model names
@@ -192,25 +217,41 @@ class GeminiPlugin:
             self.config: GeminiPluginConfig = None
         "Initialize the Gemini plugin with default configuration."
     
-    def name(
-            self
-        ) -> str:  # Plugin name identifier
+    def name(self) -> str: # Plugin name identifier
+            """Return the plugin name identifier."""
+            return "gemini"
+        
+        @property
+        def version(self) -> str: # Plugin version string
         "Return the plugin name identifier."
     
-    def version(
-            self
-        ) -> str:  # Plugin version string
+    def version(self) -> str: # Plugin version string
+            """Return the plugin version string."""
+            return "1.0.0"
+        
+        @property
+        def supported_formats(self) -> List[str]: # List of supported audio formats
         "Return the plugin version string."
     
-    def supported_formats(
-            self
-        ) -> List[str]:  # List of supported audio formats
+    def supported_formats(self) -> List[str]: # List of supported audio formats
+            """Return list of supported audio file formats."""
+            return ["wav", "mp3", "aiff", "aac", "ogg", "flac"]
+    
+        def get_current_config(self) -> Dict[str, Any]: # Current configuration as dictionary
         "Return list of supported audio file formats."
     
-    def get_current_config(
-            self
-        ) -> GeminiPluginConfig:  # Current configuration dataclass
-        "Return current configuration."
+    def get_current_config(self) -> Dict[str, Any]: # Current configuration as dictionary
+            """Return current configuration state."""
+            if not self.config
+        "Return current configuration state."
+    
+    def get_config_schema(self) -> Dict[str, Any]: # JSON Schema for configuration
+            """Return JSON Schema for UI generation."""
+            return dataclass_to_jsonschema(GeminiPluginConfig)
+    
+        @staticmethod
+        def get_config_dataclass() -> GeminiPluginConfig: # Configuration dataclass
+        "Return JSON Schema for UI generation."
     
     def get_config_dataclass() -> GeminiPluginConfig: # Configuration dataclass
             """Return dataclass describing the plugin's configuration options."""
@@ -218,25 +259,34 @@ class GeminiPlugin:
         
         def initialize(
             self,
-            config: Optional[Any] = None  # Configuration dataclass, dict, or None
+            config: Optional[Any] = None # Configuration dataclass, dict, or None
         ) -> None
         "Return dataclass describing the plugin's configuration options."
     
     def initialize(
             self,
-            config: Optional[Any] = None  # Configuration dataclass, dict, or None
+            config: Optional[Any] = None # Configuration dataclass, dict, or None
         ) -> None
-        "Initialize the plugin with configuration."
+        "Initialize or re-configure the plugin (idempotent)."
     
     def execute(
             self,
-            audio: Union[AudioData, str, Path],  # Audio data object or path to audio file
-            **kwargs  # Additional arguments to override config
-        ) -> TranscriptionResult:  # Transcription result object
+            audio: Union[AudioData, str, Path], # Audio data object or path to audio file
+            **kwargs # Additional arguments to override config
+        ) -> TranscriptionResult: # Transcription result object
         "Transcribe audio using Gemini."
     
-    def is_available(
+    def is_available(self) -> bool: # True if the Gemini API is available
+            """Check if Gemini API is available."""
+            return GEMINI_AVAILABLE
+    
+        def cleanup(
             self
-        ) -> bool:  # True if the Gemini API is available
+        ) -> None
         "Check if Gemini API is available."
+    
+    def cleanup(
+            self
+        ) -> None
+        "Clean up resources."
 ```

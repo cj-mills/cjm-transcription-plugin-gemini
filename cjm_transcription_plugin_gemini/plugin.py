@@ -35,7 +35,7 @@ except ImportError:
 from cjm_transcription_plugin_system.plugin_interface import TranscriptionPlugin
 from cjm_transcription_plugin_system.core import AudioData, TranscriptionResult
 from cjm_plugin_system.utils.validation import (
-    dict_to_config, config_to_dict, validate_config,
+    dict_to_config, config_to_dict, validate_config, dataclass_to_jsonschema,
     SCHEMA_TITLE, SCHEMA_DESC, SCHEMA_MIN, SCHEMA_MAX, SCHEMA_ENUM
 )
 
@@ -208,33 +208,32 @@ class GeminiPlugin(TranscriptionPlugin):
         self.available_models = []
         self.model_token_limits = {}  # Store model name -> output_token_limit mapping
         self.uploaded_files = []  # Track uploaded files for cleanup
+        self._current_api_key = None  # Track API key for change detection
     
     @property
-    def name(
-        self
-    ) -> str:  # Plugin name identifier
+    def name(self) -> str: # Plugin name identifier
         """Return the plugin name identifier."""
         return "gemini"
     
     @property
-    def version(
-        self
-    ) -> str:  # Plugin version string
+    def version(self) -> str: # Plugin version string
         """Return the plugin version string."""
         return "1.0.0"
     
     @property
-    def supported_formats(
-        self
-    ) -> List[str]:  # List of supported audio formats
+    def supported_formats(self) -> List[str]: # List of supported audio formats
         """Return list of supported audio file formats."""
         return ["wav", "mp3", "aiff", "aac", "ogg", "flac"]
 
-    def get_current_config(
-        self
-    ) -> GeminiPluginConfig:  # Current configuration dataclass
-        """Return current configuration."""
-        return self.config
+    def get_current_config(self) -> Dict[str, Any]: # Current configuration as dictionary
+        """Return current configuration state."""
+        if not self.config:
+            return {}
+        return config_to_dict(self.config)
+
+    def get_config_schema(self) -> Dict[str, Any]: # JSON Schema for configuration
+        """Return JSON Schema for UI generation."""
+        return dataclass_to_jsonschema(GeminiPluginConfig)
 
     @staticmethod
     def get_config_dataclass() -> GeminiPluginConfig: # Configuration dataclass
@@ -243,44 +242,66 @@ class GeminiPlugin(TranscriptionPlugin):
     
     def initialize(
         self,
-        config: Optional[Any] = None  # Configuration dataclass, dict, or None
+        config: Optional[Any] = None # Configuration dataclass, dict, or None
     ) -> None:
-        """Initialize the plugin with configuration."""
-        # Handle config input
-        if config is None:
-            self.config = GeminiPluginConfig()
-        elif isinstance(config, GeminiPluginConfig):
-            self.config = config
-        elif isinstance(config, dict):
-            self.config = dict_to_config(GeminiPluginConfig, config, validate=True)
-        else:
-            raise TypeError(f"Expected GeminiPluginConfig, dict, or None, got {type(config).__name__}")
+        """Initialize or re-configure the plugin (idempotent)."""
+        # Parse new config
+        new_config = dict_to_config(GeminiPluginConfig, config or {})
         
-        # Initialize client
-        try:
-            api_key = self._get_api_key()
-            self.client = genai.Client(api_key=api_key)
-            
-            # Refresh available models if enabled
-            if self.config.auto_refresh_models:
-                self.available_models = self._refresh_available_models()
-            else:
-                self.available_models = self.DEFAULT_AUDIO_MODELS
-            
-            # Update max_output_tokens based on selected model's limit
-            self._update_max_tokens_for_model(self.config.model)
+        # Determine if we need to reinitialize client
+        needs_client_reinit = False
+        
+        if self.config:
+            # Check if API key changed
+            new_api_key = new_config.api_key or os.environ.get("GEMINI_API_KEY")
+            if new_api_key != self._current_api_key:
+                self.logger.info("Config change: API key changed, reinitializing client")
+                needs_client_reinit = True
+        else:
+            # First initialization
+            needs_client_reinit = True
+        
+        # Apply new config
+        self.config = new_config
+        
+        # Initialize or reinitialize client if needed
+        if needs_client_reinit:
+            try:
+                api_key = self._get_api_key()
+                self._current_api_key = api_key
+                self.client = genai.Client(api_key=api_key)
                 
-            self.logger.info(f"Initialized Gemini plugin with model '{self.config.model}'")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to initialize Gemini client: {e}")
-            raise
+                # Refresh available models if enabled
+                if self.config.auto_refresh_models:
+                    self.available_models = self._refresh_available_models()
+                else:
+                    self.available_models = self.DEFAULT_AUDIO_MODELS
+                
+                self.logger.info(f"Initialized Gemini client with model '{self.config.model}'")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to initialize Gemini client: {e}")
+                raise
+        
+        # Update max_output_tokens based on selected model's limit
+        self._update_max_tokens_for_model(self.config.model)
+        
+        self.logger.info(f"Gemini plugin configured with model '{self.config.model}'")
+    
+    def _save_to_db(
+        self,
+        result: TranscriptionResult # Transcription result to save
+    ) -> None:
+        """Save transcription result to database (placeholder)."""
+        # Placeholder for DB logic
+        # Implementation will use self.db_path which can be injected via config or environment
+        pass
 
     def execute(
         self,
-        audio: Union[AudioData, str, Path],  # Audio data object or path to audio file
-        **kwargs  # Additional arguments to override config
-    ) -> TranscriptionResult:  # Transcription result object
+        audio: Union[AudioData, str, Path], # Audio data object or path to audio file
+        **kwargs # Additional arguments to override config
+    ) -> TranscriptionResult: # Transcription result object
         """Transcribe audio using Gemini."""
         if not self.client:
             raise RuntimeError("Plugin not initialized. Call initialize() first.")
@@ -405,6 +426,9 @@ class GeminiPlugin(TranscriptionPlugin):
                 }
             )
             
+            # Save to database (placeholder)
+            self._save_to_db(result)
+            
             self.logger.info(f"Transcription completed: {len(transcribed_text.split())} words")
             return result
             
@@ -425,11 +449,25 @@ class GeminiPlugin(TranscriptionPlugin):
                 except Exception:
                     pass
 
-    def is_available(
-        self
-    ) -> bool:  # True if the Gemini API is available
+    def is_available(self) -> bool: # True if the Gemini API is available
         """Check if Gemini API is available."""
         return GEMINI_AVAILABLE
+
+    def cleanup(
+        self
+    ) -> None:
+        """Clean up resources."""
+        # Clean up any remaining uploaded files
+        if self.config and self.config.delete_uploaded_files:
+            for uploaded_file in self.uploaded_files:
+                try:
+                    self._delete_uploaded_file(uploaded_file.name)
+                except Exception as e:
+                    self.logger.warning(f"Failed to delete file during cleanup: {e}")
+        
+        self.uploaded_files = []
+        self.client = None
+        self.logger.info("Cleanup completed")
 
 # %% ../nbs/plugin.ipynb 5
 from dataclasses import replace as dataclass_replace
@@ -606,23 +644,6 @@ def _delete_uploaded_file(
         self.logger.warning(f"Failed to delete uploaded file {file_name}: {e}")
 
 # %% ../nbs/plugin.ipynb 7
-@patch
-def cleanup(
-    self:GeminiPlugin
-) -> None:
-    """Clean up resources."""
-    # Clean up any remaining uploaded files
-    if self.config and self.config.delete_uploaded_files:
-        for uploaded_file in self.uploaded_files:
-            try:
-                self._delete_uploaded_file(uploaded_file.name)
-            except Exception as e:
-                self.logger.warning(f"Failed to delete file during cleanup: {e}")
-    
-    self.uploaded_files = []
-    self.client = None
-    self.logger.info("Cleanup completed")
-
 @patch
 def get_available_models(
     self:GeminiPlugin

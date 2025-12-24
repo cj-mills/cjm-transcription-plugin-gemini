@@ -1,0 +1,39 @@
+# Environment for cjm-transcription-plugin-gemini
+# Lightweight API wrapper - no heavy ML dependencies
+name: cjm-transcription-plugin-gemini
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  # Python version
+  - python=3.11
+
+  # System dependencies (conda-managed for proper linking)
+  - ffmpeg
+
+  # Pip dependencies
+  - pip
+  - pip:
+    # Core plugin infrastructure
+    - cjm-plugin-system
+    - cjm-transcription-plugin-system
+
+    # Gemini API
+    - google-genai
+
+    # Audio processing
+    - soundfile
+    - numpy
+
+    # FFmpeg utilities
+    - cjm-ffmpeg-utils
+
+    # Utilities
+    - fastcore
+    - pandas
+
+    # Worker dependencies (FastAPI, uvicorn, psutil, httpx)
+    - fastapi
+    - uvicorn
+    - psutil
+    - httpx
