@@ -6,7 +6,12 @@
 __all__ = ['GeminiPluginConfig', 'GeminiPlugin']
 
 # %% ../nbs/plugin.ipynb 3
+import sqlite3
+import json
+import time
 import os
+import sys
+from uuid import uuid4
 import logging
 import tempfile
 from pathlib import Path
@@ -37,6 +42,10 @@ from cjm_transcription_plugin_system.core import AudioData, TranscriptionResult
 from cjm_plugin_system.utils.validation import (
     dict_to_config, config_to_dict, validate_config, dataclass_to_jsonschema,
     SCHEMA_TITLE, SCHEMA_DESC, SCHEMA_MIN, SCHEMA_MAX, SCHEMA_ENUM
+)
+
+from cjm_transcription_plugin_gemini.meta import (
+    get_plugin_metadata
 )
 
 # %% ../nbs/plugin.ipynb 4
@@ -180,7 +189,7 @@ class GeminiPluginConfig:
         }
     )
 
-
+# %% ../nbs/plugin.ipynb 5
 class GeminiPlugin(TranscriptionPlugin):
     """Google Gemini API transcription plugin."""
     
@@ -288,14 +297,49 @@ class GeminiPlugin(TranscriptionPlugin):
         
         self.logger.info(f"Gemini plugin configured with model '{self.config.model}'")
     
-    def _save_to_db(
-        self,
-        result: TranscriptionResult # Transcription result to save
-    ) -> None:
-        """Save transcription result to database (placeholder)."""
-        # Placeholder for DB logic
-        # Implementation will use self.db_path which can be injected via config or environment
-        pass
+    def _init_db(self):
+        """Ensure table exists."""
+        db_path = get_plugin_metadata()["db_path"]
+        with sqlite3.connect(db_path) as con:
+            con.execute("""
+                CREATE TABLE IF NOT EXISTS transcriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT,
+                    audio_path TEXT,
+                    text TEXT,
+                    segments JSON,
+                    metadata JSON,
+                    created_at REAL
+                )
+            """)
+            con.execute("CREATE INDEX IF NOT EXISTS idx_job_id ON transcriptions(job_id)")
+
+    def _save_to_db(self, result: TranscriptionResult, audio_path: str, **kwargs) -> None:
+        """Save result to SQLite."""
+        try:
+            self._init_db()
+            db_path = get_plugin_metadata()["db_path"]
+            
+            # Extract a job_id if provided, else gen random
+            job_id = kwargs.get("job_id", str(uuid4()))
+            
+            # Serialize complex objects
+            segments_json = json.dumps(result.segments) if result.segments else None
+            metadata_json = json.dumps(result.metadata)
+            
+            with sqlite3.connect(db_path) as con:
+                con.execute(
+                    """
+                    INSERT INTO transcriptions 
+                    (job_id, audio_path, text, segments, metadata, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (job_id, str(audio_path), result.text, segments_json, metadata_json, time.time())
+                )
+                self.logger.info(f"Saved result to DB (Job: {job_id})")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to save to DB: {e}")
 
     def execute(
         self,
@@ -426,8 +470,12 @@ class GeminiPlugin(TranscriptionPlugin):
                 }
             )
             
-            # Save to database (placeholder)
-            self._save_to_db(result)
+            # Capture original path for DB
+            original_path = str(audio)
+            if hasattr(audio, 'to_temp_file'): original_path = "in_memory_data"
+            
+            # Save to database
+            self._save_to_db(result, original_path, **kwargs)
             
             self.logger.info(f"Transcription completed: {len(transcribed_text.split())} words")
             return result
@@ -469,7 +517,7 @@ class GeminiPlugin(TranscriptionPlugin):
         self.client = None
         self.logger.info("Cleanup completed")
 
-# %% ../nbs/plugin.ipynb 5
+# %% ../nbs/plugin.ipynb 6
 from dataclasses import replace as dataclass_replace
 
 @patch
@@ -537,7 +585,7 @@ def _update_max_tokens_for_model(
         self.config = dataclass_replace(self.config, max_output_tokens=default_limit)
         self.logger.info(f"Using default max_output_tokens of {default_limit} for model '{model_name}'")
 
-# %% ../nbs/plugin.ipynb 6
+# %% ../nbs/plugin.ipynb 7
 @patch
 def update_config(
     self:GeminiPlugin,
@@ -643,7 +691,7 @@ def _delete_uploaded_file(
     except Exception as e:
         self.logger.warning(f"Failed to delete uploaded file {file_name}: {e}")
 
-# %% ../nbs/plugin.ipynb 7
+# %% ../nbs/plugin.ipynb 8
 @patch
 def get_available_models(
     self:GeminiPlugin
@@ -668,7 +716,7 @@ def get_model_info(
         "current_max_output_tokens": self.config.max_output_tokens if self.config else 65536
     }
 
-# %% ../nbs/plugin.ipynb 8
+# %% ../nbs/plugin.ipynb 9
 from typing import Generator
 
 @patch
