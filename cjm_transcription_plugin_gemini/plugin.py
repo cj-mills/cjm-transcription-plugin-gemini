@@ -453,6 +453,12 @@ class GeminiPlugin(TranscriptionPlugin):
                     config=generate_config
                 )
                 transcribed_text = response.text if hasattr(response, 'text') else str(response)
+
+            # Capture provenance metadata passed via kwargs
+            provenance_meta = {
+                k: v for k, v in kwargs.items() 
+                if k in ['source_start_time', 'source_end_time']
+            }
             
             # Create result
             result = TranscriptionResult(
@@ -461,10 +467,11 @@ class GeminiPlugin(TranscriptionPlugin):
                 segments=None,  # Gemini doesn't provide segments by default
                 metadata={
                     "model": model,
+                    **provenance_meta, #
                     "temperature": temperature,
                     "top_p": top_p,
                     "max_output_tokens": max_output_tokens,
-                    "prompt": prompt[:100] + "..." if len(prompt) > 100 else prompt,
+                    "prompt": prompt,
                     "use_file_upload": use_file_upload,
                     "use_streaming": use_streaming
                 }
