@@ -1,0 +1,112 @@
+[
+  {
+    "objectID": "meta.html",
+    "href": "meta.html",
+    "title": "Metadata",
+    "section": "",
+    "text": "source",
+    "crumbs": [
+      "Metadata"
+    ]
+  },
+  {
+    "objectID": "meta.html#testing",
+    "href": "meta.html#testing",
+    "title": "Metadata",
+    "section": "Testing",
+    "text": "Testing\n\nimport json\n\nmetadata = get_plugin_metadata()\nprint(json.dumps(metadata, indent=2))\n\n{\n  \"name\": \"cjm-transcription-plugin-gemini\",\n  \"version\": \"0.0.15\",\n  \"type\": \"transcription\",\n  \"category\": \"transcription\",\n  \"interface\": \"cjm_transcription_plugin_system.plugin_interface.TranscriptionPlugin\",\n  \"module\": \"cjm_transcription_plugin_gemini.plugin\",\n  \"class\": \"GeminiPlugin\",\n  \"python_path\": \"/opt/hostedtoolcache/Python/3.12.12/x64/bin/python\",\n  \"db_path\": \"/opt/hostedtoolcache/Python/3.12.12/x64/data/gemini_transcriptions.db\",\n  \"resources\": {\n    \"requires_gpu\": false,\n    \"min_gpu_vram_mb\": 0,\n    \"recommended_gpu_vram_mb\": 0,\n    \"min_system_ram_mb\": 512\n  },\n  \"env_vars\": {}\n}",
+    "crumbs": [
+      "Metadata"
+    ]
+  },
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "cjm-transcription-plugin-gemini",
+    "section": "",
+    "text": "pip install cjm_transcription_plugin_gemini",
+    "crumbs": [
+      "cjm-transcription-plugin-gemini"
+    ]
+  },
+  {
+    "objectID": "index.html#install",
+    "href": "index.html#install",
+    "title": "cjm-transcription-plugin-gemini",
+    "section": "",
+    "text": "pip install cjm_transcription_plugin_gemini",
+    "crumbs": [
+      "cjm-transcription-plugin-gemini"
+    ]
+  },
+  {
+    "objectID": "index.html#project-structure",
+    "href": "index.html#project-structure",
+    "title": "cjm-transcription-plugin-gemini",
+    "section": "Project Structure",
+    "text": "Project Structure\nnbs/\n├── meta.ipynb   # Metadata introspection for the Gemini plugin used by cjm-ctl to generate the registration manifest.\n└── plugin.ipynb # Plugin implementation for Google Gemini API transcription\nTotal: 2 notebooks across 1 directory",
+    "crumbs": [
+      "cjm-transcription-plugin-gemini"
+    ]
+  },
+  {
+    "objectID": "index.html#module-dependencies",
+    "href": "index.html#module-dependencies",
+    "title": "cjm-transcription-plugin-gemini",
+    "section": "Module Dependencies",
+    "text": "Module Dependencies\ngraph LR\n    meta[meta&lt;br/&gt;Metadata]\n    plugin[plugin&lt;br/&gt;Gemini Plugin]\n\n    plugin --&gt; meta\n1 cross-module dependencies detected",
+    "crumbs": [
+      "cjm-transcription-plugin-gemini"
+    ]
+  },
+  {
+    "objectID": "index.html#cli-reference",
+    "href": "index.html#cli-reference",
+    "title": "cjm-transcription-plugin-gemini",
+    "section": "CLI Reference",
+    "text": "CLI Reference\nNo CLI commands found in this project.",
+    "crumbs": [
+      "cjm-transcription-plugin-gemini"
+    ]
+  },
+  {
+    "objectID": "index.html#module-overview",
+    "href": "index.html#module-overview",
+    "title": "cjm-transcription-plugin-gemini",
+    "section": "Module Overview",
+    "text": "Module Overview\nDetailed documentation for each module in the project:\n\nMetadata (meta.ipynb)\n\nMetadata introspection for the Gemini plugin used by cjm-ctl to generate the registration manifest.\n\n\nImport\nfrom cjm_transcription_plugin_gemini.meta import (\n    get_plugin_metadata\n)\n\n\nFunctions\ndef get_plugin_metadata() -&gt; Dict[str, Any]: # Plugin metadata for manifest generation\n    \"\"\"Return metadata required to register this plugin with the PluginManager.\"\"\"\n    # Fallback base path (current behavior for backward compatibility)\n    base_path = os.path.dirname(os.path.dirname(sys.executable))\n    \n    # Use CJM config if available, else fallback to env-relative paths\n    cjm_data_dir = os.environ.get(\"CJM_DATA_DIR\")\n    \n    # Plugin data directory\n    plugin_name = \"cjm-transcription-plugin-gemini\"\n    if cjm_data_dir\n    \"Return metadata required to register this plugin with the PluginManager.\"\n\n\n\nGemini Plugin (plugin.ipynb)\n\nPlugin implementation for Google Gemini API transcription\n\n\nImport\nfrom cjm_transcription_plugin_gemini.plugin import (\n    GeminiPluginConfig,\n    GeminiPlugin\n)\n\n\nFunctions\n@patch\ndef _get_api_key(\n    self:GeminiPlugin\n) -&gt; str:  # The API key string\n    \"Get API key from config or environment.\"\n@patch\ndef _refresh_available_models(\n    self:GeminiPlugin\n) -&gt; List[str]:  # List of available model names\n    \"Fetch and filter available models from Gemini API.\"\n@patch\ndef _update_max_tokens_for_model(\n    self:GeminiPlugin,\n    model_name: str  # Model name to update tokens for\n) -&gt; None\n    \"Update max_output_tokens config based on the model's token limit.\"\n@patch\ndef update_config(\n    self:GeminiPlugin,\n    config: Union[Dict[str, Any], GeminiPluginConfig]  # New configuration values\n) -&gt; None\n    \"Update plugin configuration, adjusting max_tokens if model changes.\"\n@patch\ndef _prepare_audio(\n    self:GeminiPlugin,\n    audio: Union[AudioData, str, Path]  # Audio data object or path to audio file\n) -&gt; Tuple[Path, bool]:  # Tuple of (processed audio path, whether temp file was created)\n    \"Prepare audio file for upload.\"\n@patch\ndef _upload_audio_file(\n    self:GeminiPlugin,\n    audio_path: Path  # Path to audio file to upload\n) -&gt; Any:  # Uploaded file object\n    \"Upload audio file to Gemini API.\"\n@patch\ndef _delete_uploaded_file(\n    self:GeminiPlugin,\n    file_name: str  # Name of file to delete\n) -&gt; None\n    \"Delete an uploaded file from Gemini API.\"\n@patch\ndef get_available_models(\n    self:GeminiPlugin\n) -&gt; List[str]:  # List of available model names\n    \"Get list of available audio-capable models.\"\n@patch\ndef get_model_info(\n    self:GeminiPlugin,\n    model_name: Optional[str] = None  # Model name to get info for, defaults to current model\n) -&gt; Dict[str, Any]:  # Dict with model information\n    \"Get information about a specific model including token limits.\"\n@patch\ndef supports_streaming(\n    self:GeminiPlugin\n) -&gt; bool:  # True if streaming is supported\n    \"Check if this plugin supports streaming transcription.\"\n@patch\ndef execute_stream(\n    self:GeminiPlugin,\n    audio: Union[AudioData, str, Path],  # Audio data object or path to audio file\n    **kwargs  # Additional arguments to override config\n) -&gt; Generator[str, None, TranscriptionResult]:  # Yields text chunks, returns final result\n    \"Stream transcription results chunk by chunk.\"\n\n\nClasses\n@dataclass\nclass GeminiPluginConfig:\n    \"Configuration for Gemini transcription plugin.\"\n    \n    model: str = field(...)\n    api_key: Optional[str] = field(...)\n    prompt: str = field(...)\n    temperature: float = field(...)\n    top_p: float = field(...)\n    max_output_tokens: int = field(...)\n    seed: Optional[int] = field(...)\n    response_mime_type: str = field(...)\n    downsample_audio: bool = field(...)\n    downsample_rate: int = field(...)\n    downsample_channels: int = field(...)\n    safety_settings: str = field(...)\n    auto_refresh_models: bool = field(...)\n    model_filter: List[str] = field(...)\n    use_file_upload: bool = field(...)\n    use_streaming: bool = field(...)\n    delete_uploaded_files: bool = field(...)\nclass GeminiPlugin:\n    def __init__(self):\n        \"\"\"Initialize the Gemini plugin with default configuration.\"\"\"\n        self.logger = logging.getLogger(f\"{__name__}.{type(self).__name__}\")\n        self.config: GeminiPluginConfig = None\n    \"Google Gemini API transcription plugin.\"\n    \n    def __init__(self):\n            \"\"\"Initialize the Gemini plugin with default configuration.\"\"\"\n            self.logger = logging.getLogger(f\"{__name__}.{type(self).__name__}\")\n            self.config: GeminiPluginConfig = None\n        \"Initialize the Gemini plugin with default configuration.\"\n    \n    def name(self) -&gt; str: # Plugin name identifier\n            \"\"\"Return the plugin name identifier.\"\"\"\n            return \"gemini\"\n        \n        @property\n        def version(self) -&gt; str: # Plugin version string\n        \"Return the plugin name identifier.\"\n    \n    def version(self) -&gt; str: # Plugin version string\n            \"\"\"Return the plugin version string.\"\"\"\n            return \"1.0.0\"\n        \n        @property\n        def supported_formats(self) -&gt; List[str]: # List of supported audio formats\n        \"Return the plugin version string.\"\n    \n    def supported_formats(self) -&gt; List[str]: # List of supported audio formats\n            \"\"\"Return list of supported audio file formats.\"\"\"\n            return [\"wav\", \"mp3\", \"aiff\", \"aac\", \"ogg\", \"flac\"]\n    \n        def get_current_config(self) -&gt; Dict[str, Any]: # Current configuration as dictionary\n        \"Return list of supported audio file formats.\"\n    \n    def get_current_config(self) -&gt; Dict[str, Any]: # Current configuration as dictionary\n            \"\"\"Return current configuration state.\"\"\"\n            if not self.config\n        \"Return current configuration state.\"\n    \n    def get_config_schema(self) -&gt; Dict[str, Any]: # JSON Schema for configuration\n            \"\"\"Return JSON Schema for UI generation.\"\"\"\n            return dataclass_to_jsonschema(GeminiPluginConfig)\n    \n        @staticmethod\n        def get_config_dataclass() -&gt; GeminiPluginConfig: # Configuration dataclass\n        \"Return JSON Schema for UI generation.\"\n    \n    def get_config_dataclass() -&gt; GeminiPluginConfig: # Configuration dataclass\n            \"\"\"Return dataclass describing the plugin's configuration options.\"\"\"\n            return GeminiPluginConfig\n        \n        def initialize(\n            self,\n            config: Optional[Any] = None # Configuration dataclass, dict, or None\n        ) -&gt; None\n        \"Return dataclass describing the plugin's configuration options.\"\n    \n    def initialize(\n            self,\n            config: Optional[Any] = None # Configuration dataclass, dict, or None\n        ) -&gt; None\n        \"Initialize or re-configure the plugin (idempotent).\"\n    \n    def execute(\n            self,\n            audio: Union[AudioData, str, Path], # Audio data object or path to audio file\n            **kwargs # Additional arguments to override config\n        ) -&gt; TranscriptionResult: # Transcription result object\n        \"Transcribe audio using Gemini.\"\n    \n    def is_available(self) -&gt; bool: # True if the Gemini API is available\n            \"\"\"Check if Gemini API is available.\"\"\"\n            return GEMINI_AVAILABLE\n    \n        def cleanup(\n            self\n        ) -&gt; None\n        \"Check if Gemini API is available.\"\n    \n    def cleanup(\n            self\n        ) -&gt; None\n        \"Clean up resources.\"",
+    "crumbs": [
+      "cjm-transcription-plugin-gemini"
+    ]
+  },
+  {
+    "objectID": "plugin.html",
+    "href": "plugin.html",
+    "title": "Gemini Plugin",
+    "section": "",
+    "text": "source",
+    "crumbs": [
+      "Gemini Plugin"
+    ]
+  },
+  {
+    "objectID": "plugin.html#testing-the-plugin",
+    "href": "plugin.html#testing-the-plugin",
+    "title": "Gemini Plugin",
+    "section": "Testing the Plugin",
+    "text": "Testing the Plugin\n\n# Test basic functionality\nplugin = GeminiPlugin()\n\n# Check availability\nprint(f\"Gemini available: {plugin.is_available()}\")\nprint(f\"Plugin name: {plugin.name}\")\nprint(f\"Plugin version: {plugin.version}\")\nprint(f\"Supported formats: {plugin.supported_formats}\")\nprint(f\"Config class: {plugin.config_class.__name__}\")\n\nGemini available: True\nPlugin name: gemini\nPlugin version: 1.0.0\nSupported formats: ['wav', 'mp3', 'aiff', 'aac', 'ogg', 'flac']\nConfig class: GeminiPluginConfig\n\n\n\n# Test configuration dataclass\nfrom dataclasses import fields\n\nprint(\"Configuration fields:\")\nfor f in fields(GeminiPluginConfig):\n    desc = f.metadata.get(SCHEMA_DESC, 'No description')\n    default = f.default if f.default is not f.default_factory else f.default_factory()\n    print(f\"  {f.name}: {desc} (default: {default!r})\")\n\nConfiguration fields:\n  model: Gemini model to use for transcription (default: 'gemini-2.5-flash')\n  api_key: Google API key (defaults to GEMINI_API_KEY env var) (default: None)\n  prompt: Prompt for transcription (default: 'Generate a transcription of the audio, only extract speech and ignore background audio.')\n  temperature: Sampling temperature (default: 0.0)\n  top_p: Top-p sampling parameter (default: 0.95)\n  max_output_tokens: Maximum number of output tokens (default: 65536)\n  seed: Random seed for reproducibility (default: None)\n  response_mime_type: Response MIME type (default: 'text/plain')\n  downsample_audio: Downsample audio before uploading (requires ffmpeg) (default: False)\n  downsample_rate: Target sample rate for downsampling (default: 16000)\n  downsample_channels: Number of audio channels (1=mono, 2=stereo) (default: 1)\n  safety_settings: Safety filter threshold (default: 'OFF')\n  auto_refresh_models: Automatically refresh available models list (default: True)\n  model_filter: Keywords to exclude from model names (e.g., ['tts', 'image']) (default: &lt;dataclasses._MISSING_TYPE object at 0x7f57c9d92cf0&gt;)\n  use_file_upload: Upload audio files to Gemini API instead of embedding in request (default: False)\n  use_streaming: Use streaming response for transcription (default: False)\n  delete_uploaded_files: Delete uploaded files after transcription (default: True)\n\n\n\n# Test get_config_schema for UI generation\nimport json\n\nschema = plugin.get_config_schema()\nprint(\"JSON Schema for GeminiPluginConfig:\")\nprint(f\"  Name: {schema['name']}\")\nprint(f\"  Properties count: {len(schema['properties'])}\")\nprint(f\"  Model field enum: {schema['properties']['model'].get('enum', [])[:3]}...\")\nprint(f\"\\nSample properties:\")\nprint(json.dumps({k: v for k, v in list(schema['properties'].items())[:3]}, indent=2))\n\nJSON Schema for GeminiPluginConfig:\n  Name: GeminiPluginConfig\n  Properties count: 17\n  Model field enum: ['gemini-2.5-flash', 'gemini-2.5-flash-preview-05-20', 'gemini-2.5-pro']...\n\nSample properties:\n{\n  \"model\": {\n    \"type\": \"string\",\n    \"title\": \"Model\",\n    \"description\": \"Gemini model to use for transcription\",\n    \"enum\": [\n      \"gemini-2.5-flash\",\n      \"gemini-2.5-flash-preview-05-20\",\n      \"gemini-2.5-pro\",\n      \"gemini-2.5-pro-preview-05-06\",\n      \"gemini-2.0-flash\",\n      \"gemini-2.0-flash-exp\",\n      \"gemini-1.5-flash\",\n      \"gemini-1.5-flash-latest\",\n      \"gemini-1.5-pro\",\n      \"gemini-1.5-pro-latest\"\n    ],\n    \"default\": \"gemini-2.5-flash\"\n  },\n  \"api_key\": {\n    \"type\": [\n      \"string\",\n      \"null\"\n    ],\n    \"title\": \"API Key\",\n    \"description\": \"Google API key (defaults to GEMINI_API_KEY env var)\",\n    \"default\": null\n  },\n  \"prompt\": {\n    \"type\": \"string\",\n    \"title\": \"Prompt\",\n    \"description\": \"Prompt for transcription\",\n    \"default\": \"Generate a transcription of the audio, only extract speech and ignore background audio.\"\n  }\n}\n\n\n\n# Test initialization (requires API key)\nif os.environ.get(\"GEMINI_API_KEY\"):\n    plugin.initialize({\"model\": \"gemini-2.5-flash\"})\n    print(f\"Initialized with model: {plugin.config.model}\")\n    \n    # Get available models\n    models = plugin.get_available_models()\n    print(f\"\\nFound {len(models)} available models\")\n    print(\"Top 5 models:\")\n    for model in models[:5]:\n        print(f\"  - {model}\")\nelse:\n    print(\"Set GEMINI_API_KEY environment variable to test initialization\")\n\nInitialized with model: gemini-2.5-flash\n\nFound 25 available models\nTop 5 models:\n  - nano-banana-pro-preview\n  - gemma-3n-e4b-it\n  - gemma-3n-e2b-it\n  - gemma-3-4b-it\n  - gemma-3-27b-it",
+    "crumbs": [
+      "Gemini Plugin"
+    ]
+  },
+  {
+    "objectID": "plugin.html#testing-dynamic-token-limits",
+    "href": "plugin.html#testing-dynamic-token-limits",
+    "title": "Gemini Plugin",
+    "section": "Testing Dynamic Token Limits",
+    "text": "Testing Dynamic Token Limits\nTest that max_output_tokens is dynamically updated based on the selected model’s output_token_limit.\n\n# Test dynamic token limit updates\nif os.environ.get(\"GEMINI_API_KEY\"):\n    # Initialize plugin\n    plugin = GeminiPlugin()\n    plugin.initialize({\"model\": \"gemini-2.5-flash\"})\n    \n    # Check token limits for different models\n    print(\"Token limits for different models:\")\n    print(\"-\" * 50)\n    \n    # Display token limits that were discovered\n    for model_name in list(plugin.model_token_limits.keys())[:5]:\n        token_limit = plugin.model_token_limits[model_name]\n        print(f\"{model_name}: {token_limit:,} tokens\")\n    \n    print(\"\\nCurrent configuration:\")\n    print(f\"Model: {plugin.config.model}\")\n    print(f\"Max output tokens: {plugin.config.max_output_tokens:,}\")\n    \n    # Get model info\n    model_info = plugin.get_model_info()\n    print(f\"\\nModel info for {model_info['name']}:\")\n    print(f\"  Output token limit: {model_info['output_token_limit']:,}\")\n    print(f\"  Current max_output_tokens: {model_info['current_max_output_tokens']:,}\")\nelse:\n    print(\"Set GEMINI_API_KEY environment variable to test token limits\")\n\nToken limits for different models:\n--------------------------------------------------\ngemini-2.5-flash: 65,536 tokens\ngemini-2.5-pro: 65,536 tokens\ngemini-2.0-flash: 8,192 tokens\ngemini-2.0-flash-001: 8,192 tokens\ngemini-2.0-flash-lite-001: 8,192 tokens\n\nCurrent configuration:\nModel: gemini-2.5-flash\nMax output tokens: 65,536\n\nModel info for gemini-2.5-flash:\n  Output token limit: 65,536\n  Current max_output_tokens: 65,536\n\n\n\n# Test switching models and automatic token limit update\nif os.environ.get(\"GEMINI_API_KEY\"):\n    # Switch to a different model\n    print(\"Testing model switching and token limit updates:\")\n    print(\"-\" * 50)\n    \n    test_models = [\"gemini-2.5-flash\", \"gemini-1.5-pro\", \"gemini-2.0-flash\"]\n    \n    for model_name in test_models:\n        if model_name in plugin.model_token_limits:\n            # Update configuration with new model\n            plugin.update_config({\"model\": model_name})\n            \n            print(f\"\\nSwitched to model: {model_name}\")\n            print(f\"  Token limit: {plugin.model_token_limits[model_name]:,}\")\n            print(f\"  Config max_output_tokens: {plugin.config.max_output_tokens:,}\")\nelse:\n    print(\"Set GEMINI_API_KEY environment variable to test model switching\")\n\nTesting model switching and token limit updates:\n--------------------------------------------------\n\nSwitched to model: gemini-2.5-flash\n  Token limit: 65,536\n  Config max_output_tokens: 65,536\n\nSwitched to model: gemini-2.0-flash\n  Token limit: 8,192\n  Config max_output_tokens: 8,192\n\n\n\n# Test execution with runtime model override\nif os.environ.get(\"GEMINI_API_KEY\"):\n    print(\"Testing runtime model override:\")\n    print(\"-\" * 50)\n    \n    # Create test audio\n    import numpy as np\n    from cjm_transcription_plugin_system.core import AudioData\n    \n    test_audio = AudioData(\n        samples=np.random.randn(16000).astype(np.float32) * 0.1,\n        sample_rate=16000,\n    )\n    \n    # Current model and token limit\n    print(f\"Current model: {plugin.config.model}\")\n    print(f\"Current max_output_tokens: {plugin.config.max_output_tokens:,}\")\n    \n    # Execute with a different model at runtime\n    override_model = \"gemini-2.0-flash\" if plugin.config.model != \"gemini-2.0-flash\" else \"gemini-2.5-flash\"\n    \n    if override_model in plugin.model_token_limits:\n        print(f\"\\nExecuting with override model: {override_model}\")\n        print(f\"Expected token limit: {plugin.model_token_limits[override_model]:,}\")\n        \n        try:\n            result = plugin.execute(\n                test_audio,\n                model=override_model,\n                prompt=\"This is a test audio signal.\"\n            )\n            \n            print(f\"\\nTranscription metadata:\")\n            print(f\"  Model used: {result.metadata['model']}\")\n            print(f\"  Max output tokens: {result.metadata['max_output_tokens']:,}\")\n            \n            # Check if config was updated\n            print(f\"\\nConfig after execution:\")\n            print(f\"  Model: {plugin.config.model}\")\n            print(f\"  Max output tokens: {plugin.config.max_output_tokens:,}\")\n            \n        except Exception as e:\n            print(f\"Execution error (expected for random audio): {e}\")\nelse:\n    print(\"Set GEMINI_API_KEY environment variable to test runtime override\")\n\nSet GEMINI_API_KEY environment variable to test runtime override",
+    "crumbs": [
+      "Gemini Plugin"
+    ]
+  }
+]
