@@ -467,7 +467,7 @@ class GeminiPlugin(TranscriptionPlugin):
                 segments=None,  # Gemini doesn't provide segments by default
                 metadata={
                     "model": model,
-                    **provenance_meta, #
+                    **provenance_meta,
                     "temperature": temperature,
                     "top_p": top_p,
                     "max_output_tokens": max_output_tokens,
