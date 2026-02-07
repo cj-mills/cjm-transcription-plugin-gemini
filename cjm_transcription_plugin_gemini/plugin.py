@@ -6,9 +6,7 @@
 __all__ = ['GeminiPluginConfig', 'GeminiPlugin']
 
 # %% ../nbs/plugin.ipynb #f9a2bc9f
-import sqlite3
 import json
-import time
 import os
 import sys
 from uuid import uuid4
@@ -39,6 +37,8 @@ except ImportError:
 # Import domain-specific plugin interface from migrated system
 from cjm_transcription_plugin_system.plugin_interface import TranscriptionPlugin
 from cjm_transcription_plugin_system.core import AudioData, TranscriptionResult
+from cjm_transcription_plugin_system.storage import TranscriptionStorage
+from cjm_plugin_system.utils.hashing import hash_file, hash_bytes
 from cjm_plugin_system.utils.validation import (
     dict_to_config, config_to_dict, validate_config, dataclass_to_jsonschema,
     SCHEMA_TITLE, SCHEMA_DESC, SCHEMA_MIN, SCHEMA_MAX, SCHEMA_ENUM
@@ -218,6 +218,7 @@ class GeminiPlugin(TranscriptionPlugin):
         self.model_token_limits = {}  # Store model name -> output_token_limit mapping
         self.uploaded_files = []  # Track uploaded files for cleanup
         self._current_api_key = None  # Track API key for change detection
+        self.storage: Optional[TranscriptionStorage] = None
     
     @property
     def name(self) -> str: # Plugin name identifier
@@ -295,51 +296,11 @@ class GeminiPlugin(TranscriptionPlugin):
         # Update max_output_tokens based on selected model's limit
         self._update_max_tokens_for_model(self.config.model)
         
-        self.logger.info(f"Gemini plugin configured with model '{self.config.model}'")
-    
-    def _init_db(self):
-        """Ensure table exists."""
+        # Initialize standardized storage
         db_path = get_plugin_metadata()["db_path"]
-        with sqlite3.connect(db_path) as con:
-            con.execute("""
-                CREATE TABLE IF NOT EXISTS transcriptions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_id TEXT,
-                    audio_path TEXT,
-                    text TEXT,
-                    segments JSON,
-                    metadata JSON,
-                    created_at REAL
-                )
-            """)
-            con.execute("CREATE INDEX IF NOT EXISTS idx_job_id ON transcriptions(job_id)")
-
-    def _save_to_db(self, result: TranscriptionResult, audio_path: str, **kwargs) -> None:
-        """Save result to SQLite."""
-        try:
-            self._init_db()
-            db_path = get_plugin_metadata()["db_path"]
-            
-            # Extract a job_id if provided, else gen random
-            job_id = kwargs.get("job_id", str(uuid4()))
-            
-            # Serialize complex objects
-            segments_json = json.dumps(result.segments) if result.segments else None
-            metadata_json = json.dumps(result.metadata)
-            
-            with sqlite3.connect(db_path) as con:
-                con.execute(
-                    """
-                    INSERT INTO transcriptions 
-                    (job_id, audio_path, text, segments, metadata, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (job_id, str(audio_path), result.text, segments_json, metadata_json, time.time())
-                )
-                self.logger.info(f"Saved result to DB (Job: {job_id})")
-                
-        except Exception as e:
-            self.logger.error(f"Failed to save to DB: {e}")
+        self.storage = TranscriptionStorage(db_path)
+        
+        self.logger.info(f"Gemini plugin configured with model '{self.config.model}'")
 
     def execute(
         self,
@@ -357,6 +318,9 @@ class GeminiPlugin(TranscriptionPlugin):
         # Prepare audio file
         audio_path, temp_created = self._prepare_audio(audio)
         uploaded_file = None
+        
+        # Hash the audio file before transcription
+        audio_hash = hash_file(str(audio_path))
         
         try:
             # Get config values, allowing kwargs overrides
@@ -477,12 +441,29 @@ class GeminiPlugin(TranscriptionPlugin):
                 }
             )
             
-            # Capture original path for DB
-            original_path = str(audio)
-            if hasattr(audio, 'to_temp_file'): original_path = "in_memory_data"
+            # Hash the transcription output
+            text_hash = hash_bytes(result.text.encode())
             
-            # Save to database
-            self._save_to_db(result, original_path, **kwargs)
+            # Determine the original audio path for DB storage
+            original_path = str(audio)
+            if hasattr(audio, 'to_temp_file'):
+                original_path = "in_memory_data"
+            
+            # Save to standardized storage
+            job_id = kwargs.get("job_id", str(uuid4()))
+            try:
+                self.storage.save(
+                    job_id=job_id,
+                    audio_path=original_path,
+                    audio_hash=audio_hash,
+                    text=result.text,
+                    text_hash=text_hash,
+                    segments=result.segments,
+                    metadata=result.metadata
+                )
+                self.logger.info(f"Saved result to DB (Job: {job_id})")
+            except Exception as e:
+                self.logger.error(f"Failed to save to DB: {e}")
             
             self.logger.info(f"Transcription completed: {len(transcribed_text.split())} words")
             return result
