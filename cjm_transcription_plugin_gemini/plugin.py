@@ -41,6 +41,7 @@ from cjm_transcription_plugin_system.plugin_interface import TranscriptionPlugin
 from cjm_transcription_plugin_system.core import AudioData, TranscriptionResult
 from cjm_transcription_plugin_system.storage import TranscriptionStorage
 from cjm_plugin_system.utils.hashing import hash_file, hash_bytes
+from cjm_plugin_system.core.errors import PluginInputError, PluginFatalError
 from cjm_plugin_system.utils.validation import (
     dict_to_config, config_to_dict, validate_config, dataclass_to_jsonschema,
     SCHEMA_TITLE, SCHEMA_DESC, SCHEMA_MIN, SCHEMA_MAX, SCHEMA_ENUM
@@ -311,7 +312,9 @@ class GeminiPlugin(TranscriptionPlugin):
     ) -> TranscriptionResult: # Transcription result object
         """Transcribe audio using Gemini."""
         if not self.client:
-            raise RuntimeError("Plugin not initialized. Call initialize() first.")
+            raise PluginFatalError(  # SG-47: substrate must have called initialize() before execute() — fatal state issue
+            "Plugin not initialized. Call initialize() first."
+        )
         
         # Check if model is being overridden at execution time
         if "model" in kwargs and kwargs["model"] != self.config.model:
@@ -519,7 +522,9 @@ def _get_api_key(
     if not api_key:
         api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        raise ValueError("No API key provided. Set GEMINI_API_KEY environment variable or provide api_key in config")
+        raise PluginFatalError(  # SG-47: API key missing — operator config issue, fatal until configured
+        "No API key provided. Set GEMINI_API_KEY environment variable or provide api_key in config"
+    )
     return api_key
 
 @patch
@@ -591,7 +596,9 @@ def update_config(
     elif isinstance(config, GeminiPluginConfig):
         self.config = config
     else:
-        raise TypeError(f"Expected dict or GeminiPluginConfig, got {type(config).__name__}")
+        raise PluginInputError(  # SG-47: caller passed wrong config shape
+        f"Expected dict or GeminiPluginConfig, got {type(config).__name__}", fields_invalid=["config"],
+    )
     
     # If model changed, update max_output_tokens
     if self.config.model and self.config.model != old_model:
@@ -627,7 +634,9 @@ def _prepare_audio(
         audio_path = Path(temp_file.name)
         temp_created = True
     else:
-        raise ValueError(f"Unsupported audio input type: {type(audio)}")
+        raise PluginInputError(  # SG-47: typed input-validation
+            f"Unsupported audio input type: {type(audio)}", fields_invalid=["audio"],
+        )
     
     # Optionally downsample audio
     if self.config.downsample_audio and FFMPEG_AVAILABLE:
@@ -724,7 +733,9 @@ def execute_stream(
 ) -> Generator[str, None, TranscriptionResult]:  # Yields text chunks, returns final result
     """Stream transcription results chunk by chunk."""
     if not self.client:
-        raise RuntimeError("Plugin not initialized. Call initialize() first.")
+        raise PluginFatalError(  # SG-47: substrate must have called initialize() before execute() — fatal state issue
+            "Plugin not initialized. Call initialize() first."
+        )
     
     # Force streaming mode in config
     kwargs['use_streaming'] = True
