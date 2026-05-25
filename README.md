@@ -120,9 +120,15 @@ def update_config(
 @patch
 def _prepare_audio(
     self:GeminiPlugin,
-    audio: Union[AudioData, str, Path]  # Audio data object or path to audio file
+    audio: Union[str, Path]  # Path to a decodable audio file
 ) -> Tuple[Path, bool]:  # Tuple of (processed audio path, whether temp file was created)
-    "Prepare audio file for upload."
+    """
+    Prepare audio file for upload.
+    
+    The caller provides a decodable audio file path; in-memory preparation is no
+    longer a plugin responsibility. Optional downsampling (a relocation candidate
+    that belongs in an upstream ffmpeg pipeline step) is retained for now.
+    """
 ```
 
 ``` python
@@ -172,7 +178,7 @@ def supports_streaming(
 @patch
 def execute_stream(
     self:GeminiPlugin,
-    audio: Union[AudioData, str, Path],  # Audio data object or path to audio file
+    audio: Union[str, Path],  # Audio data object or path to audio file
     **kwargs  # Additional arguments to override config
 ) -> Generator[str, None, TranscriptionResult]:  # Yields text chunks, returns final result
     "Stream transcription results chunk by chunk."
@@ -272,7 +278,7 @@ class GeminiPlugin:
     
     def execute(
             self,
-            audio: Union[AudioData, str, Path], # Audio data object or path to audio file
+            audio: Union[str, Path], # Audio data object or path to audio file
             **kwargs # Additional arguments to override config
         ) -> TranscriptionResult: # Transcription result object
         "Transcribe audio using Gemini."
