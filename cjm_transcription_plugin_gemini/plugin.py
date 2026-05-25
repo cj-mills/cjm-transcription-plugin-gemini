@@ -38,7 +38,7 @@ except ImportError:
     
 # Import domain-specific plugin interface from migrated system
 from cjm_transcription_plugin_system.plugin_interface import TranscriptionPlugin
-from cjm_transcription_plugin_system.core import AudioData, TranscriptionResult
+from cjm_transcription_plugin_system.core import TranscriptionResult
 from cjm_transcription_plugin_system.storage import TranscriptionStorage
 from cjm_plugin_system.utils.hashing import hash_file, hash_bytes
 from cjm_plugin_system.core.errors import PluginInputError, PluginFatalError
@@ -307,7 +307,7 @@ class GeminiPlugin(TranscriptionPlugin):
 
     def execute(
         self,
-        audio: Union[AudioData, str, Path], # Audio data object or path to audio file
+        audio: Union[str, Path], # Audio data object or path to audio file
         **kwargs # Additional arguments to override config
     ) -> TranscriptionResult: # Transcription result object
         """Transcribe audio using Gemini."""
@@ -449,26 +449,18 @@ class GeminiPlugin(TranscriptionPlugin):
             # Hash the transcription output
             text_hash = hash_bytes(result.text.encode())
             
-            # Determine the original audio path for DB storage
-            original_path = str(audio)
-            if hasattr(audio, 'to_temp_file'):
-                original_path = "in_memory_data"
-            
-            # Save to standardized storage
+            # Save to standardized storage (helper logs success/failure; never raises)
             job_id = kwargs.get("job_id", str(uuid4()))
-            try:
-                self.storage.save(
-                    job_id=job_id,
-                    audio_path=original_path,
-                    audio_hash=audio_hash,
-                    text=result.text,
-                    text_hash=text_hash,
-                    segments=result.segments,
-                    metadata=result.metadata
-                )
-                self.logger.info(f"Saved result to DB (Job: {job_id})")
-            except Exception as e:
-                self.logger.error(f"Failed to save to DB: {e}")
+            self.storage.save_with_logging(
+                job_id=job_id,
+                audio_path=str(audio),
+                audio_hash=audio_hash,
+                text=result.text,
+                text_hash=text_hash,
+                segments=result.segments,
+                metadata=result.metadata,
+                logger=self.logger,
+            )
             
             self.logger.info(f"Transcription completed: {len(transcribed_text.split())} words")
             return result
@@ -607,37 +599,23 @@ def update_config(
 @patch
 def _prepare_audio(
     self:GeminiPlugin,
-    audio: Union[AudioData, str, Path]  # Audio data object or path to audio file
+    audio: Union[str, Path]  # Path to a decodable audio file
 ) -> Tuple[Path, bool]:  # Tuple of (processed audio path, whether temp file was created)
-    """Prepare audio file for upload."""
+    """Prepare audio file for upload.
+
+    The caller provides a decodable audio file path; in-memory preparation is no
+    longer a plugin responsibility. Optional downsampling (a relocation candidate
+    that belongs in an upstream ffmpeg pipeline step) is retained for now."""
     temp_created = False
-    
+
     if isinstance(audio, (str, Path)):
         audio_path = Path(audio)
-    elif isinstance(audio, AudioData):
-        # Save AudioData to temporary file
-        import soundfile as sf
-        temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        
-        audio_array = audio.samples
-        # Convert to mono if stereo
-        if audio_array.ndim > 1:
-            audio_array = audio_array.mean(axis=1)
-        
-        # Ensure float32 and normalized
-        if audio_array.dtype != np.float32:
-            audio_array = audio_array.astype(np.float32)
-        if audio_array.max() > 1.0:
-            audio_array = audio_array / np.abs(audio_array).max()
-        
-        sf.write(temp_file.name, audio_array, audio.sample_rate)
-        audio_path = Path(temp_file.name)
-        temp_created = True
     else:
         raise PluginInputError(  # SG-47: typed input-validation
-            f"Unsupported audio input type: {type(audio)}", fields_invalid=["audio"],
+            f"Unsupported audio input type: {type(audio)}; expected a file path (str or Path)",
+            fields_invalid=["audio"],
         )
-    
+
     # Optionally downsample audio
     if self.config.downsample_audio and FFMPEG_AVAILABLE:
         try:
@@ -648,18 +626,18 @@ def _prepare_audio(
                 sample_rate=self.config.downsample_rate,
                 channels=self.config.downsample_channels
             )
-            
+
             # Clean up original temp file if created
             if temp_created:
                 audio_path.unlink()
-            
+
             audio_path = downsampled
             temp_created = True
             self.logger.info(f"Downsampled audio to {self.config.downsample_rate}Hz")
-            
+
         except Exception as e:
             self.logger.warning(f"Failed to downsample audio: {e}")
-    
+
     return audio_path, temp_created
 
 @patch
@@ -728,7 +706,7 @@ def supports_streaming(
 @patch  
 def execute_stream(
     self:GeminiPlugin,
-    audio: Union[AudioData, str, Path],  # Audio data object or path to audio file
+    audio: Union[str, Path],  # Audio data object or path to audio file
     **kwargs  # Additional arguments to override config
 ) -> Generator[str, None, TranscriptionResult]:  # Yields text chunks, returns final result
     """Stream transcription results chunk by chunk."""
