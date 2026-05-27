@@ -84,18 +84,17 @@ from cjm_transcription_plugin_gemini.plugin import (
 
 ``` python
 @patch
-def _get_api_key(
-    self:GeminiPlugin
-) -> str:  # The API key string
-    "Get API key from config or environment."
-```
-
-``` python
-@patch
 def _refresh_available_models(
     self:GeminiPlugin
-) -> List[str]:  # List of available model names
-    "Fetch and filter available models from Gemini API."
+) -> List[str]:  # Live audio-capable model names (empty if no client / API unreachable)
+    """
+    Fetch + filter audio-capable models from the LIVE Gemini API (CR-11).
+    
+    Returns [] when there's no client or the API can't be reached — there is no
+    static fallback list (a stale model list is worse than none; a baked default
+    rots as Google retires/adds models). Side effect: repopulates
+    self.model_token_limits (model name -> output_token_limit) for the live set.
+    """
 ```
 
 ``` python
@@ -104,7 +103,7 @@ def _update_max_tokens_for_model(
     self:GeminiPlugin,
     model_name: str  # Model name to update tokens for
 ) -> None
-    "Update max_output_tokens config based on the model's token limit."
+    "Clamp max_output_tokens to the model's live output_token_limit when known."
 ```
 
 ``` python
@@ -153,8 +152,13 @@ def _delete_uploaded_file(
 @patch
 def get_available_models(
     self:GeminiPlugin
-) -> List[str]:  # List of available model names
-    "Get list of available audio-capable models."
+) -> List[str]:  # Live audio-capable model names (empty if no API key / API unreachable)
+    """
+    Get the live list of audio-capable models (CR-11).
+    
+    Lazily ensures the client from the injected API key, then refreshes from the
+    API. Returns [] when no key is available — no static fallback.
+    """
 ```
 
 ``` python
@@ -163,7 +167,7 @@ def get_model_info(
     self:GeminiPlugin,
     model_name: Optional[str] = None  # Model name to get info for, defaults to current model
 ) -> Dict[str, Any]:  # Dict with model information
-    "Get information about a specific model including token limits."
+    "Get information about a specific model including its token limit."
 ```
 
 ``` python
@@ -189,10 +193,22 @@ def execute_stream(
 ``` python
 @dataclass
 class GeminiPluginConfig:
-    "Configuration for Gemini transcription plugin."
+    """
+    Configuration for Gemini transcription plugin.
     
-    model: str = field(...)
-    api_key: Optional[str] = field(...)
+    CR-11/CR-12 notes:
+      - `model` has NO static enum and NO default. Its valid domain is the live
+        Gemini model list, surfaced at runtime via `get_config_options()` — a
+        baked-in enum/default goes stale (models are retired/added server-side),
+        and if the live list can't be fetched the API is unusable anyway, so a
+        default selection is worthless. `model` is None until the operator picks
+        one from the live list.
+      - The API key is NOT a config field. It is a secret declared in
+        `GeminiPlugin.WORKER_ENV` and resolved from the SecretStore into the
+        worker env at spawn (see CR-12).
+    """
+    
+    model: Optional[str] = field(...)
     prompt: str = field(...)
     temperature: float = field(...)
     top_p: float = field(...)
@@ -203,7 +219,6 @@ class GeminiPluginConfig:
     downsample_rate: int = field(...)
     downsample_channels: int = field(...)
     safety_settings: str = field(...)
-    auto_refresh_models: bool = field(...)
     model_filter: List[str] = field(...)
     use_file_upload: bool = field(...)
     use_streaming: bool = field(...)
@@ -274,7 +289,14 @@ class GeminiPlugin:
             self,
             config: Optional[Any] = None # Configuration dataclass, dict, or None
         ) -> None
-        "Initialize or re-configure the plugin (idempotent)."
+        "First-time setup (CR-4): apply config + set up storage.
+
+Does NOT eagerly create the API client or fetch the model list — the
+client is created lazily (see `_ensure_client`) once the GEMINI_API_KEY
+is present in the worker env. This lets the plugin LOAD without a key
+(so a config UI can collect one post-load), and means the live model
+list (`get_config_options`) only populates once the key is set + the
+worker has respawned with it injected."
     
     def execute(
             self,
@@ -287,10 +309,58 @@ class GeminiPlugin:
             """Check if Gemini API is available."""
             return GEMINI_AVAILABLE
     
+        def get_config_options(self) -> Dict[str, "FieldOptions"]
+        "Check if Gemini API is available."
+    
+    def get_config_options(self) -> Dict[str, "FieldOptions"]:
+            """CR-11: live config option domains, keyed by config field name.
+    
+            Surfaces the live Gemini model list for `model` (with per-model output
+            token limits as option metadata + a derived `max_output_tokens` ceiling
+            constraint for the currently-selected model). Returns {} when no client
+            is available (no API key yet) or the API can't be reached — there is no
+            useful static fallback (a stale model list is worse than none), so the
+            UI shows 'set an API key first' rather than a frozen enum.
+            """
+            self._ensure_client()
+            if self.client is None
+        "CR-11: live config option domains, keyed by config field name.
+
+Surfaces the live Gemini model list for `model` (with per-model output
+token limits as option metadata + a derived `max_output_tokens` ceiling
+constraint for the currently-selected model). Returns {} when no client
+is available (no API key yet) or the API can't be reached — there is no
+useful static fallback (a stale model list is worse than none), so the
+UI shows 'set an API key first' rather than a frozen enum."
+    
+    def prefetch(self) -> None:
+            """CR-4: eagerly create the client + warm the live model list.
+    
+            Optional pre-warm so the first get_config_options / execute is fast.
+            No-op (client stays None) when no API key is injected yet.
+            """
+            self._ensure_client()
+            if self.client is not None
+        "CR-4: eagerly create the client + warm the live model list.
+
+Optional pre-warm so the first get_config_options / execute is fast.
+No-op (client stays None) when no API key is injected yet."
+    
+    def on_disable(self) -> None:
+            """CR-2: release the API client when the operator disables the plugin.
+    
+            Lightweight for an API plugin (no GPU/model memory), but drops the client
+            so a re-enable / next execute lazily re-creates it from the current env.
+            """
+            self.client = None
+    
         def cleanup(
             self
         ) -> None
-        "Check if Gemini API is available."
+        "CR-2: release the API client when the operator disables the plugin.
+
+Lightweight for an API plugin (no GPU/model memory), but drops the client
+so a re-enable / next execute lazily re-creates it from the current env."
     
     def cleanup(
             self
