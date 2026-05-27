@@ -1,0 +1,34 @@
+plugins:
+  # ----------------------------------------------------------------
+  # Transcription: Gemini (this library)
+  # ----------------------------------------------------------------
+  - name: gemini
+    env_name: test-gemini
+
+    # Environment File
+    env_file: "./environment.yml"
+
+    # The Plugin Package
+    package: "/mnt/SN850X_8TB_EXT4/Projects/GitHub/cj-mills/cjm-transcription-plugin-gemini/"
+
+    # Interface Libraries
+    interface_libs:
+      - "git+https://github.com/cj-mills/cjm-plugin-system.git"
+      - "git+https://github.com/cj-mills/cjm-transcription-plugin-system.git"
+
+  # ----------------------------------------------------------------
+  # Media Processing: ffmpeg
+  # ----------------------------------------------------------------
+  - name: ffmpeg
+    env_name: test-ffmpeg
+    
+    # Environment File
+    env_file: "https://raw.githubusercontent.com/cj-mills/cjm-media-plugin-ffmpeg/main/environment.yml"
+    
+    # The Plugin Package
+    package: "git+https://github.com/cj-mills/cjm-media-plugin-ffmpeg.git"
+    
+    # Interface Libraries
+    interface_libs:
+      - "git+https://github.com/cj-mills/cjm-plugin-system.git"
+      - "git+https://github.com/cj-mills/cjm-media-plugin-system.git"
