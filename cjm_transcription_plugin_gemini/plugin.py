@@ -419,13 +419,17 @@ class GeminiPlugin(TranscriptionPlugin):
             if use_streaming:
                 # Use streaming response
                 transcribed_text = ""
+                _last_chunk = None
                 for chunk in self.client.models.generate_content_stream(
                     model=model,
                     contents=contents,
                     config=generate_config
                 ):
+                    _last_chunk = chunk
                     if hasattr(chunk, 'text'):
                         transcribed_text += chunk.text
+                if _last_chunk is not None:
+                    self._report_usage_from(_last_chunk)  # SG-54: usage rides the final chunk
                 self.logger.info("Streaming transcription completed")
             else:
                 # Use regular response (existing behavior)
@@ -435,6 +439,7 @@ class GeminiPlugin(TranscriptionPlugin):
                     config=generate_config
                 )
                 transcribed_text = response.text if hasattr(response, 'text') else str(response)
+                self._report_usage_from(response)  # SG-54
 
             # Capture provenance metadata passed via kwargs
             provenance_meta = {
@@ -617,6 +622,31 @@ def _update_max_tokens_for_model(
         default_limit = 65536
         self.config = dataclass_replace(self.config, max_output_tokens=default_limit)
         self.logger.info(f"Using default max_output_tokens of {default_limit} for model '{model_name}'")
+
+@patch
+def _report_usage_from(
+    self:GeminiPlugin,
+    obj  # A Gemini response or stream chunk carrying .usage_metadata
+) -> None:
+    """SG-54: extract token usage from a Gemini response's usage_metadata and
+    report it to the substrate (unit-agnostic). Gemini's unit is tokens; the
+    plugin picks the unit-name keys. Defensive no-op if usage_metadata absent."""
+    um = getattr(obj, "usage_metadata", None)
+    if um is None:
+        return
+    usage = {}
+    pt = getattr(um, "prompt_token_count", None)
+    ct = getattr(um, "candidates_token_count", None)
+    tt = getattr(um, "total_token_count", None)
+    th = getattr(um, "thoughts_token_count", None)
+    cc = getattr(um, "cached_content_token_count", None)
+    if pt is not None: usage["input_tokens"] = float(pt)
+    if ct is not None: usage["output_tokens"] = float(ct)
+    if tt is not None: usage["total_tokens"] = float(tt)
+    if th: usage["thoughts_tokens"] = float(th)
+    if cc: usage["cached_tokens"] = float(cc)
+    usage["requests"] = 1.0
+    self.report_usage(usage)
 
 # %% ../nbs/plugin.ipynb #f3e50ea0-61eb-42bf-a4e5-3e6780a97b6d
 @patch
@@ -860,6 +890,7 @@ def execute_stream(
         
         transcribed_text = ""
         chunks_yielded = 0
+        _last_chunk = None
         
         # Stream chunks as they arrive
         for chunk in self.client.models.generate_content_stream(
@@ -867,12 +898,15 @@ def execute_stream(
             contents=contents,
             config=generate_config
         ):
+            _last_chunk = chunk
             if hasattr(chunk, 'text'):
                 chunk_text = chunk.text
                 transcribed_text += chunk_text
                 chunks_yielded += 1
                 yield chunk_text  # Yield each chunk in real-time
         
+        if _last_chunk is not None:
+            self._report_usage_from(_last_chunk)  # SG-54: usage rides the final chunk
         self.logger.info(f"Streaming completed: {chunks_yielded} chunks, {len(transcribed_text.split())} words")
         
         # Return final result
