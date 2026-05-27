@@ -16,10 +16,9 @@ import logging
 import tempfile
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List, Union, Tuple
+from typing import Dict, Any, Optional, List, Union, Tuple, ClassVar
 import re
 
-import numpy as np
 
 from fastcore.basics import patch
 
@@ -42,6 +41,10 @@ from cjm_transcription_plugin_system.core import TranscriptionResult
 from cjm_transcription_plugin_system.storage import TranscriptionStorage
 from cjm_plugin_system.utils.hashing import hash_file, hash_bytes
 from cjm_plugin_system.core.errors import PluginInputError, PluginFatalError
+# CR-12: EnvVarSpec declares the worker-env contract (the API key is a secret,
+# injected into the worker env at spawn). CR-11: ConfigOption / FieldOptions
+# carry the live, runtime-derived model domain.
+from cjm_plugin_system.core.interface import EnvVarSpec, ConfigOption, FieldOptions
 from cjm_plugin_system.utils.validation import (
     dict_to_config, config_to_dict, validate_config, dataclass_to_jsonschema,
     SCHEMA_TITLE, SCHEMA_DESC, SCHEMA_MIN, SCHEMA_MAX, SCHEMA_ENUM
@@ -54,26 +57,24 @@ from cjm_transcription_plugin_gemini.meta import (
 # %% ../nbs/plugin.ipynb #adc2fb86-7489-41e2-9018-4d434ef6bdb7
 @dataclass
 class GeminiPluginConfig:
-    """Configuration for Gemini transcription plugin."""
-    model:str = field(
-        default="gemini-2.5-flash",
-        metadata={
-            SCHEMA_TITLE: "Model",
-            SCHEMA_DESC: "Gemini model to use for transcription",
-            SCHEMA_ENUM: [
-                "gemini-2.5-flash", "gemini-2.5-flash-preview-05-20",
-                "gemini-2.5-pro", "gemini-2.5-pro-preview-05-06",
-                "gemini-2.0-flash", "gemini-2.0-flash-exp",
-                "gemini-1.5-flash", "gemini-1.5-flash-latest",
-                "gemini-1.5-pro", "gemini-1.5-pro-latest"
-            ]
-        }
-    )
-    api_key:Optional[str] = field(
+    """Configuration for Gemini transcription plugin.
+
+    CR-11/CR-12 notes:
+      - `model` has NO static enum and NO default. Its valid domain is the live
+        Gemini model list, surfaced at runtime via `get_config_options()` — a
+        baked-in enum/default goes stale (models are retired/added server-side),
+        and if the live list can't be fetched the API is unusable anyway, so a
+        default selection is worthless. `model` is None until the operator picks
+        one from the live list.
+      - The API key is NOT a config field. It is a secret declared in
+        `GeminiPlugin.WORKER_ENV` and resolved from the SecretStore into the
+        worker env at spawn (see CR-12).
+    """
+    model:Optional[str] = field(
         default=None,
         metadata={
-            SCHEMA_TITLE: "API Key",
-            SCHEMA_DESC: "Google API key (defaults to GEMINI_API_KEY env var)"
+            SCHEMA_TITLE: "Model",
+            SCHEMA_DESC: "Gemini model for transcription. Domain is runtime-derived from the live API model list (get_config_options); no static default."
         }
     )
     prompt:str = field(
@@ -105,7 +106,7 @@ class GeminiPluginConfig:
         default=65536,
         metadata={
             SCHEMA_TITLE: "Max Output Tokens",
-            SCHEMA_DESC: "Maximum number of output tokens",
+            SCHEMA_DESC: "Maximum number of output tokens (per-model ceiling surfaced as a live constraint via get_config_options)",
             SCHEMA_MIN: 1,
             SCHEMA_MAX: 65536
         }
@@ -156,18 +157,11 @@ class GeminiPluginConfig:
             SCHEMA_ENUM: ["OFF", "BLOCK_NONE", "BLOCK_FEW", "BLOCK_SOME", "BLOCK_MOST"]
         }
     )
-    auto_refresh_models:bool = field(
-        default=True,
-        metadata={
-            SCHEMA_TITLE: "Auto Refresh Models",
-            SCHEMA_DESC: "Automatically refresh available models list"
-        }
-    )
     model_filter:List[str] = field(
         default_factory=list,
         metadata={
             SCHEMA_TITLE: "Model Filter",
-            SCHEMA_DESC: "Keywords to exclude from model names (e.g., ['tts', 'image'])"
+            SCHEMA_DESC: "Keywords to exclude from the live model list (e.g., ['tts', 'image'])"
         }
     )
     use_file_upload:bool = field(
@@ -197,19 +191,21 @@ class GeminiPlugin(TranscriptionPlugin):
     """Google Gemini API transcription plugin."""
     
     config_class = GeminiPluginConfig
-    
-    # Default audio-capable models (can be overridden)
-    DEFAULT_AUDIO_MODELS = [
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-preview-05-20",
-        "gemini-2.5-pro",
-        "gemini-2.5-pro-preview-05-06",
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-exp",
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-pro",
-        "gemini-1.5-pro-latest",
+
+    # CR-12: the worker-environment contract. The API key is a SECRET resolved
+    # from the SecretStore (keyed by plugin name, so multiple instances share
+    # one key) and injected into the worker env at spawn — never a config field,
+    # never persisted in config / logged. Set it via
+    #   cjm-ctl set-secret cjm-transcription-plugin-gemini GEMINI_API_KEY
+    # or PluginManager.set_plugin_secret(...). Changing it respawns the worker.
+    WORKER_ENV: ClassVar[List[EnvVarSpec]] = [
+        EnvVarSpec(
+            name="GEMINI_API_KEY",
+            secret=True,
+            required=True,
+            label="Gemini API Key",
+            description="Google Gemini API key used to authenticate the worker (read from the worker env at spawn).",
+        ),
     ]
     
     def __init__(self):
@@ -218,9 +214,8 @@ class GeminiPlugin(TranscriptionPlugin):
         self.config: GeminiPluginConfig = None
         self.client = None
         self.available_models = []
-        self.model_token_limits = {}  # Store model name -> output_token_limit mapping
+        self.model_token_limits = {}  # model name -> output_token_limit (populated from the live API)
         self.uploaded_files = []  # Track uploaded files for cleanup
-        self._current_api_key = None  # Track API key for change detection
         self.storage: Optional[TranscriptionStorage] = None
     
     @property
@@ -257,53 +252,60 @@ class GeminiPlugin(TranscriptionPlugin):
         self,
         config: Optional[Any] = None # Configuration dataclass, dict, or None
     ) -> None:
-        """Initialize or re-configure the plugin (idempotent)."""
-        # Parse new config
+        """First-time setup (CR-4): apply config + set up storage.
+
+        Does NOT eagerly create the API client or fetch the model list — the
+        client is created lazily (see `_ensure_client`) once the GEMINI_API_KEY
+        is present in the worker env. This lets the plugin LOAD without a key
+        (so a config UI can collect one post-load), and means the live model
+        list (`get_config_options`) only populates once the key is set + the
+        worker has respawned with it injected.
+        """
+        self._apply_config(config)
+
+    def _apply_config(
+        self,
+        config: Optional[Any] = None # Configuration dataclass, dict, or None
+    ) -> None:
+        """CR-4 seam: (re)apply configuration without recreating the client.
+
+        The substrate's `reconfigure(old, new)` path calls this after firing any
+        RELOAD_TRIGGER releases. Gemini has no RELOAD_TRIGGER config fields — the
+        client depends only on the spawn-injected API key, and `model` / prompt /
+        sampling params are per-request — so reconfigure is a pure config-swap
+        (no client churn). The API key itself changes via a worker RESPAWN
+        (set_plugin_secret), not through here.
+        """
         new_config = dict_to_config(GeminiPluginConfig, config or {})
-        
-        # Determine if we need to reinitialize client
-        needs_client_reinit = False
-        
-        if self.config:
-            # Check if API key changed
-            new_api_key = new_config.api_key or os.environ.get("GEMINI_API_KEY")
-            if new_api_key != self._current_api_key:
-                self.logger.info("Config change: API key changed, reinitializing client")
-                needs_client_reinit = True
-        else:
-            # First initialization
-            needs_client_reinit = True
-        
-        # Apply new config
         self.config = new_config
-        
-        # Initialize or reinitialize client if needed
-        if needs_client_reinit:
-            try:
-                api_key = self._get_api_key()
-                self._current_api_key = api_key
-                self.client = genai.Client(api_key=api_key)
-                
-                # Refresh available models if enabled
-                if self.config.auto_refresh_models:
-                    self.available_models = self._refresh_available_models()
-                else:
-                    self.available_models = self.DEFAULT_AUDIO_MODELS
-                
-                self.logger.info(f"Initialized Gemini client with model '{self.config.model}'")
-                
-            except Exception as e:
-                self.logger.error(f"Failed to initialize Gemini client: {e}")
-                raise
-        
-        # Update max_output_tokens based on selected model's limit
-        self._update_max_tokens_for_model(self.config.model)
-        
-        # Initialize standardized storage
+
+        # Standardized storage (idempotent; cheap to re-open).
         db_path = get_plugin_metadata()["db_path"]
         self.storage = TranscriptionStorage(db_path)
-        
-        self.logger.info(f"Gemini plugin configured with model '{self.config.model}'")
+
+        # Clamp max_output_tokens to the selected model's live ceiling when known
+        # (model_token_limits is populated lazily once the client has listed models).
+        if self.config.model:
+            self._update_max_tokens_for_model(self.config.model)
+
+        self.logger.info(f"Gemini plugin configured (model={self.config.model!r})")
+
+    def _ensure_client(self) -> None:
+        """Lazily create the genai client from the spawn-injected GEMINI_API_KEY.
+
+        Tolerant by design: if the key is absent the client stays None and the
+        caller decides what to do (execute raises a typed error; get_config_options
+        returns {} so the UI falls back to 'set a key first'). The key is read
+        from the worker env — provenance is the SecretStore (CR-12), injected at
+        spawn; a key change arrives via a worker respawn, so reading os.environ
+        here always reflects the current injected value.
+        """
+        if self.client is not None:
+            return
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            return
+        self.client = genai.Client(api_key=api_key)
 
     def execute(
         self,
@@ -311,12 +313,24 @@ class GeminiPlugin(TranscriptionPlugin):
         **kwargs # Additional arguments to override config
     ) -> TranscriptionResult: # Transcription result object
         """Transcribe audio using Gemini."""
+        self._ensure_client()
         if not self.client:
-            raise PluginFatalError(  # SG-47: substrate must have called initialize() before execute() — fatal state issue
-            "Plugin not initialized. Call initialize() first."
-        )
-        
-        # Check if model is being overridden at execution time
+            raise PluginFatalError(  # CR-12: no API key injected — operator must set the secret
+                "No GEMINI_API_KEY in the worker environment. Set it via "
+                "`cjm-ctl set-secret cjm-transcription-plugin-gemini GEMINI_API_KEY` "
+                "(or PluginManager.set_plugin_secret), which respawns the worker with the key."
+            )
+
+        # CR-11: model has no static default — a model must be selected (from the
+        # live list) before transcription. Allow a per-call override via kwargs.
+        model = kwargs.get("model", self.config.model)
+        if not model:
+            raise PluginInputError(
+                "No Gemini model selected. Choose one from the live model list "
+                "(get_config_options) and set it in the plugin config.",
+                fields_invalid=["model"],
+            )
+        # If a model is overridden at execution time, refresh its token ceiling.
         if "model" in kwargs and kwargs["model"] != self.config.model:
             self._update_max_tokens_for_model(kwargs["model"])
         
@@ -329,7 +343,6 @@ class GeminiPlugin(TranscriptionPlugin):
         
         try:
             # Get config values, allowing kwargs overrides
-            model = kwargs.get("model", self.config.model)
             temperature = kwargs.get("temperature", self.config.temperature)
             top_p = kwargs.get("top_p", self.config.top_p)
             max_output_tokens = kwargs.get("max_output_tokens", self.config.max_output_tokens)
@@ -486,6 +499,55 @@ class GeminiPlugin(TranscriptionPlugin):
         """Check if Gemini API is available."""
         return GEMINI_AVAILABLE
 
+    def get_config_options(self) -> Dict[str, "FieldOptions"]:
+        """CR-11: live config option domains, keyed by config field name.
+
+        Surfaces the live Gemini model list for `model` (with per-model output
+        token limits as option metadata + a derived `max_output_tokens` ceiling
+        constraint for the currently-selected model). Returns {} when no client
+        is available (no API key yet) or the API can't be reached — there is no
+        useful static fallback (a stale model list is worse than none), so the
+        UI shows 'set an API key first' rather than a frozen enum.
+        """
+        self._ensure_client()
+        if self.client is None:
+            return {}
+        models = self._refresh_available_models()
+        if not models:
+            return {}
+        options = [
+            ConfigOption(
+                value=m,
+                label=m,
+                metadata={"output_token_limit": self.model_token_limits.get(m)},
+            )
+            for m in models
+        ]
+        constraints: Dict[str, Any] = {}
+        current = self.config.model if self.config else None
+        if current and current in self.model_token_limits:
+            # Live per-model ceiling for max_output_tokens (CR-11 derived constraint).
+            constraints["max_output_tokens"] = {"maximum": self.model_token_limits[current]}
+        return {"model": FieldOptions(options=options, constraints=constraints)}
+
+    def prefetch(self) -> None:
+        """CR-4: eagerly create the client + warm the live model list.
+
+        Optional pre-warm so the first get_config_options / execute is fast.
+        No-op (client stays None) when no API key is injected yet.
+        """
+        self._ensure_client()
+        if self.client is not None:
+            self.available_models = self._refresh_available_models()
+
+    def on_disable(self) -> None:
+        """CR-2: release the API client when the operator disables the plugin.
+
+        Lightweight for an API plugin (no GPU/model memory), but drops the client
+        so a re-enable / next execute lazily re-creates it from the current env.
+        """
+        self.client = None
+
     def cleanup(
         self
     ) -> None:
@@ -506,69 +568,53 @@ class GeminiPlugin(TranscriptionPlugin):
 from dataclasses import replace as dataclass_replace
 
 @patch
-def _get_api_key(
-    self:GeminiPlugin
-) -> str:  # The API key string
-    """Get API key from config or environment."""
-    api_key = self.config.api_key if self.config else None
-    if not api_key:
-        api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise PluginFatalError(  # SG-47: API key missing — operator config issue, fatal until configured
-        "No API key provided. Set GEMINI_API_KEY environment variable or provide api_key in config"
-    )
-    return api_key
-
-@patch
 def _refresh_available_models(
     self:GeminiPlugin
-) -> List[str]:  # List of available model names
-    """Fetch and filter available models from Gemini API."""
+) -> List[str]:  # Live audio-capable model names (empty if no client / API unreachable)
+    """Fetch + filter audio-capable models from the LIVE Gemini API (CR-11).
+
+    Returns [] when there's no client or the API can't be reached — there is no
+    static fallback list (a stale model list is worse than none; a baked default
+    rots as Google retires/adds models). Side effect: repopulates
+    self.model_token_limits (model name -> output_token_limit) for the live set.
+    """
+    if not self.client:
+        return []
     try:
-        if not self.client:
-            return self.DEFAULT_AUDIO_MODELS
-        
-        # Get all models that support content generation
         all_models = list(self.client.models.list())
-        gen_models = [model for model in all_models if 'generateContent' in model.supported_actions]
-        
-        # Extract model names and apply filters
-        model_filter = self.config.model_filter if self.config.model_filter else ['tts', 'image', 'learn']
-        
+        gen_models = [m for m in all_models if 'generateContent' in m.supported_actions]
+
+        # Default filter excludes non-transcription model families.
+        model_filter = self.config.model_filter if (self.config and self.config.model_filter) else ['tts', 'image', 'learn']
+
         filtered_names = []
-        self.model_token_limits = {}  # Reset token limits
-        
+        self.model_token_limits = {}  # Reset; repopulate from the live set
         for model in gen_models:
             model_name = model.name.removeprefix('models/')
-            # Skip if any filter keyword is in the model name
             if not any(keyword in model_name.lower() for keyword in model_filter):
                 filtered_names.append(model_name)
-                # Store the output token limit for this model
                 self.model_token_limits[model_name] = model.output_token_limit
-        
-        # Sort with newest/best models first
-        filtered_names.sort(reverse=True)
-        
+
+        filtered_names.sort(reverse=True)  # newest/best first
         self.logger.info(f"Found {len(filtered_names)} audio-capable models")
-        return filtered_names if filtered_names else self.DEFAULT_AUDIO_MODELS
-        
+        return filtered_names
     except Exception as e:
-        self.logger.warning(f"Could not fetch models from API: {e}. Using defaults.")
-        return self.DEFAULT_AUDIO_MODELS
+        self.logger.warning(f"Could not fetch models from the Gemini API: {e}")
+        return []
 
 @patch
 def _update_max_tokens_for_model(
     self:GeminiPlugin,
     model_name: str  # Model name to update tokens for
 ) -> None:
-    """Update max_output_tokens config based on the model's token limit."""
+    """Clamp max_output_tokens to the model's live output_token_limit when known."""
     if model_name in self.model_token_limits:
         token_limit = self.model_token_limits[model_name]
         self.config = dataclass_replace(self.config, max_output_tokens=token_limit)
         self.logger.info(f"Updated max_output_tokens to {token_limit} for model '{model_name}'")
     else:
-        # Use a sensible default if we don't have the limit
-        default_limit = 65536  # Common default for newer models
+        # Unknown until the live list is fetched; keep a sensible numeric default.
+        default_limit = 65536
         self.config = dataclass_replace(self.config, max_output_tokens=default_limit)
         self.logger.info(f"Using default max_output_tokens of {default_limit} for model '{model_name}'")
 
@@ -672,9 +718,14 @@ def _delete_uploaded_file(
 @patch
 def get_available_models(
     self:GeminiPlugin
-) -> List[str]:  # List of available model names
-    """Get list of available audio-capable models."""
-    if self.config and self.config.auto_refresh_models and self.client:
+) -> List[str]:  # Live audio-capable model names (empty if no API key / API unreachable)
+    """Get the live list of audio-capable models (CR-11).
+
+    Lazily ensures the client from the injected API key, then refreshes from the
+    API. Returns [] when no key is available — no static fallback.
+    """
+    self._ensure_client()
+    if self.client:
         self.available_models = self._refresh_available_models()
     return self.available_models
 
@@ -683,13 +734,12 @@ def get_model_info(
     self:GeminiPlugin,
     model_name: Optional[str] = None  # Model name to get info for, defaults to current model
 ) -> Dict[str, Any]:  # Dict with model information
-    """Get information about a specific model including token limits."""
+    """Get information about a specific model including its token limit."""
     if model_name is None:
-        model_name = self.config.model if self.config else "gemini-2.5-flash"
-    
+        model_name = self.config.model if self.config else None
     return {
         "name": model_name,
-        "output_token_limit": self.model_token_limits.get(model_name, 65536),
+        "output_token_limit": (self.model_token_limits.get(model_name, 65536) if model_name else None),
         "current_max_output_tokens": self.config.max_output_tokens if self.config else 65536
     }
 
@@ -710,14 +760,22 @@ def execute_stream(
     **kwargs  # Additional arguments to override config
 ) -> Generator[str, None, TranscriptionResult]:  # Yields text chunks, returns final result
     """Stream transcription results chunk by chunk."""
+    self._ensure_client()
     if not self.client:
-        raise PluginFatalError(  # SG-47: substrate must have called initialize() before execute() — fatal state issue
-            "Plugin not initialized. Call initialize() first."
+        raise PluginFatalError(  # CR-12: no API key injected
+            "No GEMINI_API_KEY in the worker environment. Set it via "
+            "`cjm-ctl set-secret cjm-transcription-plugin-gemini GEMINI_API_KEY`."
         )
-    
+
     # Force streaming mode in config
     kwargs['use_streaming'] = True
-    
+
+    # CR-11: a model must be selected (from the live list).
+    if not kwargs.get("model", self.config.model):
+        raise PluginInputError(
+            "No Gemini model selected. Choose one from the live model list.",
+            fields_invalid=["model"],
+        )
     # Check if model is being overridden at execution time
     if "model" in kwargs and kwargs["model"] != self.config.model:
         self._update_max_tokens_for_model(kwargs["model"])

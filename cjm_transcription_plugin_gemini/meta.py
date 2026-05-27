@@ -37,6 +37,7 @@ def get_plugin_metadata() -> Dict[str, Any]: # Plugin metadata for manifest gene
     return {
         "name": plugin_name,
         "version": __version__,
+        "description": "Transcribe audio via the Google Gemini API (cloud, API-key authenticated).",
         "type": "transcription",
         "category": "transcription",
         "interface": "cjm_transcription_plugin_system.plugin_interface.TranscriptionPlugin",
@@ -51,14 +52,13 @@ def get_plugin_metadata() -> Dict[str, Any]: # Plugin metadata for manifest gene
         
         # Gemini is an API wrapper - lightweight requirements
         "resources": {
-            "requires_gpu": False,
-            "min_gpu_vram_mb": 0,
-            "recommended_gpu_vram_mb": 0,
-            "min_system_ram_mb": 512
+            "requires_gpu": False
         },
         
         "env_vars": {
-            # API key should be set in environment or config
-            # "GEMINI_API_KEY": "" - intentionally not set here
+            # GEMINI_API_KEY is a SECRET declared in GeminiPlugin.WORKER_ENV (CR-12):
+            # resolved from the SecretStore and injected into the worker env at
+            # spawn. It is intentionally NOT a manifest env var (manifests are
+            # committed config; secrets never belong here).
         }
     }
