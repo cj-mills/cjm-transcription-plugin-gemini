@@ -21,8 +21,8 @@ Total: 2 notebooks across 1 directory
 
 ``` mermaid
 graph LR
-    meta[meta<br/>Metadata]
-    plugin[plugin<br/>Gemini Plugin]
+    meta["meta<br/>Metadata"]
+    plugin["plugin<br/>Gemini Plugin"]
 
     plugin --> meta
 ```
@@ -104,6 +104,19 @@ def _update_max_tokens_for_model(
     model_name: str  # Model name to update tokens for
 ) -> None
     "Clamp max_output_tokens to the model's live output_token_limit when known."
+```
+
+``` python
+@patch
+def _report_usage_from(
+    self:GeminiPlugin,
+    obj  # A Gemini response or stream chunk carrying .usage_metadata
+) -> None
+    """
+    SG-54: extract token usage from a Gemini response's usage_metadata and
+    report it to the substrate (unit-agnostic). Gemini's unit is tokens; the
+    plugin picks the unit-name keys. Defensive no-op if usage_metadata absent.
+    """
 ```
 
 ``` python
@@ -366,4 +379,10 @@ so a re-enable / next execute lazily re-creates it from the current env."
             self
         ) -> None
         "Clean up resources."
+```
+
+#### Variables
+
+``` python
+_AUDIO_MIME_MAP = {6 items}
 ```

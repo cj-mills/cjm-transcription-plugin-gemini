@@ -186,6 +186,16 @@ class GeminiPluginConfig:
         }
     )
 
+# %% ../nbs/plugin.ipynb #gemini-audio-mime-map
+_AUDIO_MIME_MAP = {
+    '.wav': 'audio/wav',
+    '.mp3': 'audio/mp3',
+    '.aiff': 'audio/aiff',
+    '.aac': 'audio/aac',
+    '.ogg': 'audio/ogg',
+    '.flac': 'audio/flac',
+}
+
 # %% ../nbs/plugin.ipynb #fcfcb260-d962-49ae-8bb9-d521a723f201
 class GeminiPlugin(TranscriptionPlugin):
     """Google Gemini API transcription plugin."""
@@ -366,15 +376,7 @@ class GeminiPlugin(TranscriptionPlugin):
                 
                 # Determine MIME type
                 suffix = audio_path.suffix.lower()
-                mime_map = {
-                    '.wav': 'audio/wav',
-                    '.mp3': 'audio/mp3',
-                    '.aiff': 'audio/aiff',
-                    '.aac': 'audio/aac',
-                    '.ogg': 'audio/ogg',
-                    '.flac': 'audio/flac'
-                }
-                mime_type = mime_map.get(suffix, 'audio/wav')
+                mime_type = _AUDIO_MIME_MAP.get(suffix, 'audio/wav')
                 
                 # Create audio content part
                 audio_content = types.Part.from_bytes(
@@ -839,15 +841,7 @@ def execute_stream(
             
             # Determine MIME type
             suffix = audio_path.suffix.lower()
-            mime_map = {
-                '.wav': 'audio/wav',
-                '.mp3': 'audio/mp3',
-                '.aiff': 'audio/aiff',
-                '.aac': 'audio/aac',
-                '.ogg': 'audio/ogg',
-                '.flac': 'audio/flac'
-            }
-            mime_type = mime_map.get(suffix, 'audio/wav')
+            mime_type = _AUDIO_MIME_MAP.get(suffix, 'audio/wav')
             
             # Create audio content part
             audio_content = types.Part.from_bytes(
